@@ -1,9 +1,17 @@
-confs/node-token
+#Local Vagrant state in any module
+.vagrant/
+
+#Private cluster keys and tokens
+node-token
 cluster_key
+cluster_key.pub
+
+#Local environment files
 .env
-vagrant/
-p1/confs/cluster_key
-p1/confs/node-token
+
+
+#VirtualBox logs
+
 VBox.log*
 
-p1/.vagrant/
+
