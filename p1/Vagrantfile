@@ -1,5 +1,5 @@
 Vagrant.configure("2") do |config|
-  config.vm.box = "generic/ubuntu2204"
+  config.vm.box = "debian/trixie64"
   config.vm.boot_timeout = 600
   config.vm.synced_folder ".", "/vagrant", disabled: true
 
@@ -11,8 +11,8 @@ Vagrant.configure("2") do |config|
   config.vm.define "osivkovS" do |s|
     s.vm.hostname = "osivkovS"
     s.vm.provider :libvirt do |lv|
-      lv.cpus = 1
-      lv.memory = 1024
+      lv.cpus = 2
+      lv.memory = 2048
     end
     s.vm.network "private_network",
       ip: "192.168.56.110",
