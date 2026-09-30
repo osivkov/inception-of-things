@@ -1,0 +1,7 @@
+<network>
+  <name>iotnet</name>
+  <forward mode='nat'/>
+  <bridge name='virbr56' stp='on' delay='0'/>
+  <ip address='192.168.56.1' netmask='255.255.255.0'>
+  </ip>
+</network>
