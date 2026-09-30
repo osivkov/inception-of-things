@@ -5,3 +5,5 @@ vagrant/
 p1/confs/cluster_key
 p1/confs/node-token
 VBox.log*
+
+p1/.vagrant/
