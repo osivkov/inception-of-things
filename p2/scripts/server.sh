@@ -16,6 +16,7 @@ apt-get install -y curl ca-certificates
 if ! command -v k3s >/dev/null 2>&1; then
 
   curl -fSL --connect-timeout 10 --max-time 120 https://get.k3s.io |
+	  INSTALL_K3S_VERSION="v1.36.5+k3s1" \
 	  INSTALL_K3S_EXEC="server --node-ip ${SERVER_IP} --advertise-address ${SERVER_IP} \
 	  --flannel-iface eth1" \
 	  sh -
