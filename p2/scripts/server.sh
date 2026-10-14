@@ -13,11 +13,14 @@ apt-get install -y curl ca-certificates
 
 #Install a single node k3s server on the private network
 
-curl -fSL --connect-timeout 10 --max-time 120 https://get.k3s.io |
-	INSTALL_K3S_EXEC="server --node-ip ${SERVER_IP} --advertise-address ${SERVER_IP} \
-	--flannel-iface eth1" \
-	sh -
+if ! command -v k3s >/dev/null 2>&1; then
 
+  curl -fSL --connect-timeout 10 --max-time 120 https://get.k3s.io |
+	  INSTALL_K3S_EXEC="server --node-ip ${SERVER_IP} --advertise-address ${SERVER_IP} \
+	  --flannel-iface eth1" \
+	  sh -
+fi
+systemctl start k3s
 #Wait for the API and node to become ready.
 
 timeout 120s bash -c '
@@ -34,3 +37,17 @@ timeout 120s bash -c '
 #Display the resulting node configuration.
 
 k3s kubectl get nodes -o wide
+
+#Deploy applications and HTTP routes.
+
+for app in app1 app2 app3;do
+  k3s kubectl apply -f "/home/vagrant/confs/${app}.yaml"
+done
+
+k3s kubectl apply -f /home/vagrant/confs/ingress.yaml
+
+# Wait for application deployments to become ready.
+
+for app in app1 app2 app3;do
+  k3s kubectl rollout status "deployment/${app}" --timeout=120s
+done
