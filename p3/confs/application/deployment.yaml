@@ -11,9 +11,9 @@ spec:
     metadata:
       labels:
         app: playground
-   spec:
-     containers:
-      - name: playground
-        image: will42/playground:v1
-        ports:
-          - containerPorts: 8888
+    spec:
+      containers:
+       - name: playground
+         image: will42/playground:v1
+         ports:
+           - containerPort: 8888
