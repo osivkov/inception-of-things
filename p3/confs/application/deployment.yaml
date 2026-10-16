@@ -14,6 +14,6 @@ spec:
     spec:
       containers:
        - name: playground
-         image: will42/playground:v1
+         image: wil42/playground:v1
          ports:
            - containerPort: 8888
