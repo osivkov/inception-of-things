@@ -46,6 +46,13 @@ kubectl -n argocd rollout status \
 # Let Argo CD deply the application from Git.
 
 kubectl apply -f "$P3_DIR/confs/argocd-application.yaml"
+kubectl -n argocd wait application/playground \
+  --for=jsonpath='{.status.sync.status}'=Synced \
+  --timeout=300s
+
+kubectl -n argocd wait application/playground \
+  --for=jsonpath='{.status.health.status}'=Healthy \
+  --timeout=300s
 
 kubectl get applications -n argocd
 
