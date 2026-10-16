@@ -1,0 +1,15 @@
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+
+metadata:
+  name: iot
+
+image: rancher/k3s:v1.36.5-k3s1
+
+servers: 1
+agents: 0
+
+ports:
+  - port: "127.0.0.1:8080:80"
+    nodeFilters:
+      - loadbalancer
