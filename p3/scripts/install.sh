@@ -43,3 +43,27 @@ K3D_URL="https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}"
 
 k3d version
 
+KUBECTL_VERSION="v1.36.5"
+KUBECTL_ARCH="$(dpkg --print-architecture)"
+KUBECTL_URL="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${KUBECTL_ARCH}"
+
+(
+  workdir="$(mktemp -d)"
+  trap 'rm -rf "$workdir"' EXIT
+  cd "$workdir"
+
+  curl -fSL --connect-timeout 10 --max-time 120 \
+    "${KUBECTL_URL}/kubectl" \
+    -o kubectl
+
+  curl -fSL --connect-timeout 10 --max-time 120 \
+    "${KUBECTL_URL}/kubectl.sha256" \
+    -o kubectl.sha256
+
+  printf '%s  kubectl\n' "$(cat kubectl.sha256)" > kubectl-checksums.txt
+  sha256sum -c kubectl-checksums.txt
+
+  install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+)
+
+kubectl version --client
