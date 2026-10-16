@@ -1,179 +1,180 @@
-# Inception of Things
+# Inception of Things (IoT)
 
-A learning project focused on virtual machines, Kubernetes networking,
-and application deployment with K3s.
+A learning project about Vagrant, K3s, and HTTP routing in Kubernetes. The project runs inside a Debian 13 VM: Vagrant uses the libvirt provider to create nested VMs on QEMU/KVM.
 
-## Environment
+## The project in one minute
 
-The project runs inside a Debian 13 virtual machine hosted by VirtualBox
-on a Codam workstation.
+P2 creates one Debian VM with the private IP `192.168.56.110`. Provisioning installs a single-node K3s cluster and deploys three small websites. Traefik reads the HTTP Host header: `app1.com` goes to app1, `app2.com` goes to app2, and every other Host goes to app3. App2 has three Pod replicas.
 
-Inside Debian, Vagrant uses the libvirt provider and QEMU/KVM to run the
-project VMs. The outer Debian VM has approximately 5.8 GiB RAM and 6 vCPUs.
+```text
+Outer Debian VM
+  └─ Vagrant + libvirt → osivkovS (192.168.56.110)
+                         └─ K3s → Traefik → app1 / app2 / app3
+```
+
+If you are returning to the project after a break, read [Quick start](#quick-start), then [P2: verify](#p2-verify). [DEVELOPER.md](DEVELOPER.md) explains what each component does and how to change it.
 
 ## Project status
 
-| Part | Current progress |
-|------|------------------|
-| P1 | Server and worker connected; both nodes verified Ready |
-| P2 | Single-node cluster and app1 HTTP routing verified |
-| P3 | Not started |
+| Part | Status based on repository files |
+| --- | --- |
+| P1 | Server and worker configuration is present; the previous README reported both nodes as Ready |
+| P2 | Three applications, three app2 replicas, and an Ingress are configured; the current cluster state still needs runtime verification |
+| P3 | Not implemented |
 
-P2 is still in progress. The remaining work includes app2 with three
-replicas, app3 as the default application, and automatic manifest deployment.
+P2 was reviewed from source files only. No VM, K3s cluster, or application was started during this review.
+
+## P2 requirements checklist
+
+| Requirement | Evidence in the repository |
+| --- | --- |
+| One VM named after a team login with an S suffix | `p2/Vagrantfile` defines only `osivkovS` |
+| Private IP `192.168.56.110` | `p2/Vagrantfile` and `p2/confs/iotnet.xml` |
+| K3s in server mode | `p2/scripts/server.sh` installs and starts K3s |
+| Three web applications | `p2/confs/app1.yaml`, `app2.yaml`, and `app3.yaml` |
+| Three replicas of application 2 | `p2/confs/app2.yaml` sets `replicas: 3` |
+| Host-based routing and app3 as the default | `p2/confs/ingress.yaml` has rules for `app1.com`, `app2.com`, and a rule without a Host |
+
+All required P2 components are present in the source files. A static review cannot confirm that provisioning succeeds, images can be pulled, Pods become ready, or HTTP requests return the expected responses.
 
 ## Repository layout
 
 ```text
-Makefile
-scripts/                Environment preparation and checks
+Makefile                 Prepare, check, and manage VMs
+scripts/                 Prepare and check the outer Debian VM
 p1/
-  Vagrantfile           Server and worker VM definitions
-  scripts/              K3s provisioning scripts
-  confs/                Network configuration and local SSH files
+  Vagrantfile            Two VMs: server and worker
+  scripts/               K3s installation
+  confs/                 Network configuration and public SSH key
 p2/
-  Vagrantfile           Single server VM definition
-  scripts/server.sh     K3s installation
+  Vagrantfile            One VM: K3s server
+  scripts/server.sh      K3s installation and manifest deployment
   confs/iotnet.xml       Private libvirt network
-  confs/app1.yaml        app1 Deployment and Service
-  confs/ingress.yaml     HTTP routing rules
-p3/                     Reserved for the next part
+  confs/app1.yaml        HTML page, Deployment, and Service for app1
+  confs/app2.yaml        Deployment and Service for app2
+  confs/app3.yaml        Deployment and Service for app3
+  confs/ingress.yaml     Traefik HTTP routes
+p3/                     Empty for now
+DEVELOPER.md             Development and verification guide
 ```
 
-## Prerequisites
+## Environment requirements
 
-The outer Debian environment requires:
+- A Debian 13 VM with nested hardware virtualization available.
+- Vagrant, the `vagrant-libvirt` plugin, QEMU/KVM, and system libvirt (`qemu:///system`).
+- `sudo` access to prepare the environment.
+- Internet access to download the Vagrant box, packages, and container images.
 
-- Vagrant and the vagrant-libvirt plugin
-- QEMU/KVM and system libvirt
-- Access to `qemu:///system`
-- Nested hardware virtualization enabled in the outer hypervisor
-- sudo access for environment preparation
-- Internet access for box, package, and container image downloads
+The `Makefile` does not install these tools. The preparation script uses `kvm_intel ept=0` for the current VirtualBox and nested KVM setup. Stop all running libvirt VMs before reloading the KVM module.
 
-The Makefile assumes these tools are already installed.
+To check the EPT setting after rebooting the outer VM:
 
-## Virtual machines
+```bash
+cat /sys/module/kvm_intel/parameters/ept
+```
 
-| Part | VM | Role | Private IP | vCPUs | RAM |
-|------|----|------|------------|-------|-----|
-| P1 | osivkovS | K3s server | 192.168.56.110 | 2 | 2048 MiB |
-| P1 | osivkovSW | K3s agent | 192.168.56.111 | 1 | 1024 MiB |
-| P2 | osivkovS | K3s server | 192.168.56.110 | 3 | 3072 MiB |
+The expected value for this setup is `N`. The setting is saved in `/etc/modprobe.d/iot-kvm.conf`. This is a local workaround for nested virtualization and may reduce performance.
 
-P1 and P2 servers use the same private IP. Stop one part before starting
-the other.
+## Quick start
 
-## Environment preparation
+Run these commands from the **repository root inside the outer Debian VM** after installing the tools listed above. Stop the P1 server first if it is running, because P1 and P2 share the same private IP.
 
-Run commands from the repository root:
+```bash
+make up PART=p2
+cd p2
+vagrant ssh osivkovS -c 'sudo k3s kubectl get deployments,ingress'
+curl -fsS --max-time 10 -H 'Host: app2.com' http://192.168.56.110/
+```
+
+The deployment list should include app1, app2, and app3; app2 should show `3/3` ready replicas. The HTTP command should print `Hello from app2`. To stop the VM from `p2`:
+
+```bash
+vagrant halt
+```
+
+The commands above describe the expected workflow; they have not been executed as part of this review.
+
+## P2: start
+
+Normally, `make up PART=p2` is enough. To inspect each preparation step separately, run these commands from the repository root inside the outer Debian VM:
 
 ```bash
 make prepare PART=p2
 make check PART=p2
 make up PART=p2
 make status PART=p2
+```
+
+`PART` defaults to `p2`. `make up` already runs `prepare` and `check`; running them separately is useful for diagnosis. `prepare` changes the KVM and libvirt network settings, `check` validates the environment, and `up` starts the VM and runs provisioning.
+
+The P1 and P2 servers both use `192.168.56.110`, so do not run them at the same time. To stop P2:
+
+```bash
 make halt PART=p2
 ```
 
-`PART` defaults to `p2`.
+Provisioning should install K3s, apply all four application and Ingress YAML files from `p2/confs`, and wait for the three Deployments to become ready.
 
-- `prepare` configures the KVM EPT workaround and the private network.
-- `check` validates the selected Vagrantfile and checks the environment.
-- `up` prepares, checks, and starts the selected part.
-- `halt` shuts down the VMs while preserving their disks.
-
-### Nested virtualization workaround
-
-VirtualBox previously crashed while running nested KVM guests.
-Disabling EPT in the outer Debian KVM module is currently used as a workaround.
-
-The preparation script loads `kvm_intel` with `ept=0` when needed and saves:
-
-```text
-options kvm_intel ept=0
-```
-
-in `/etc/modprobe.d/iot-kvm.conf`.
-
-All active libvirt VMs must be stopped before reloading the KVM module.
-Verify the setting after reboot:
+After changing YAML files on an existing VM, rerun provisioning from the repository root:
 
 ```bash
-cat /sys/module/kvm_intel/parameters/ept
+cd p2
+vagrant provision osivkovS
 ```
 
-The expected value for this workaround is `N`. This setting is specific
-to the current environment, may reduce performance, and is not proof
-that the original VirtualBox fault has been permanently resolved.
+This copies the manifests again and runs `kubectl apply`. A normal `vagrant up` on an existing VM may not rerun provisioning.
 
-## Networking
+## P2: verify
 
-- `vagrant-libvirt`: management network using DHCP.
-- `iotnet`: private NAT network, `192.168.56.0/24`.
-- `virbr56`: bridge for iotnet, with gateway address `192.168.56.1`.
-- `eth0` inside the project VMs: management interface.
-- `eth1` inside the project VMs: static private address.
+From the repository root in the outer Debian VM:
 
-K3s in P2 uses `192.168.56.110` as its node IP and `eth1` for Flannel.
+```bash
+cd p2
+vagrant ssh osivkovS -c 'sudo k3s kubectl get nodes -o wide'
+vagrant ssh osivkovS -c 'sudo k3s kubectl get deployments,services,ingress'
+vagrant ssh osivkovS -c 'sudo k3s kubectl get pods -o wide'
 
-## P1 local SSH key
-
-P1 provisioning requires these local files:
-
-```text
-p1/confs/cluster_key
-p1/confs/cluster_key.pub
+curl -fsS --max-time 10 -H 'Host: app1.com' http://192.168.56.110/
+curl -fsS --max-time 10 -H 'Host: app2.com' http://192.168.56.110/
+curl -fsS --max-time 10 -H 'Host: unknown.example' http://192.168.56.110/
 ```
 
-If the private key is missing after cloning, generate a new pair:
+| Host sent to `192.168.56.110` | Expected response | Replicas |
+| --- | --- | ---: |
+| `app1.com` | HTML containing `Hello from app1` | 1 |
+| `app2.com` | `Hello from app2` | 3 |
+| Any other Host | `Hello from app3` | 1 |
+
+The Host header lets you test the routes without DNS or `/etc/hosts`. During the defense, also show the Ingress and app2 replica count with `sudo k3s kubectl describe ingress apps` and `sudo k3s kubectl get deployment app2` inside the VM.
+
+If verification fails, check the VM and Pod status first:
+
+```bash
+vagrant status
+vagrant ssh osivkovS -c 'sudo systemctl status k3s --no-pager'
+vagrant ssh osivkovS -c 'sudo k3s kubectl get pods -A'
+```
+
+All application Pods should be `Running`, and the app2 Deployment should show `3/3` ready replicas. The HTTP requests also verify the Services and Ingress routing.
+
+## Network and VM resources
+
+| Part | VM | Role | Private IP | vCPUs | RAM |
+| --- | --- | --- | --- | ---: | ---: |
+| P1 | `osivkovS` | K3s server | `192.168.56.110` | 2 | 2048 MiB |
+| P1 | `osivkovSW` | K3s agent | `192.168.56.111` | 1 | 1024 MiB |
+| P2 | `osivkovS` | K3s server | `192.168.56.110` | 3 | 3072 MiB |
+
+Each VM has a Vagrant management interface and a private `eth1` interface. The `iotnet` network uses `192.168.56.0/24`, the `virbr56` bridge, and `192.168.56.1` as its gateway. In P2, K3s uses `192.168.56.110` as its node IP and `eth1` for Flannel.
+
+## P1: local SSH key
+
+P1 provisioning needs `p1/confs/cluster_key` and `p1/confs/cluster_key.pub`. If the private key is missing after cloning, create a new pair:
 
 ```bash
 ssh-keygen -t ed25519 -N '' -f p1/confs/cluster_key
 ```
 
-The private key is intentionally excluded from Git. The worker uses SSH
-to retrieve the current K3s join token from the server. A local
-`confs/node-token` file is not used by the current provisioning scripts.
+The private key is excluded from Git. The worker retrieves the K3s join token from the server over SSH; the current scripts do not use a local `confs/node-token` file.
 
-## P2 application deployment
-
-K3s installation runs through Vagrant shell provisioning.
-
-Application manifests currently need to be applied manually from `p2`:
-
-```bash
-cd p2
-
-vagrant ssh osivkovS -c 'sudo k3s kubectl apply -f -' < confs/app1.yaml
-vagrant ssh osivkovS -c 'sudo k3s kubectl apply -f -' < confs/ingress.yaml
-```
-
-app1 uses:
-
-- Deployment: one replica of `hashicorp/http-echo:1.0.0`
-- Container HTTP port: `5678`
-- Service: `ClusterIP`, port `80` forwarding to `5678`
-- Ingress: `app1.com`, handled by Traefik
-
-## Verification
-
-From the outer Debian VM:
-
-```bash
-cd p2
-
-vagrant ssh osivkovS -c 'sudo k3s kubectl get nodes -o wide'
-vagrant ssh osivkovS -c 'sudo k3s kubectl get pods -A'
-
-curl -fsS --max-time 10 -H 'Host: app1.com' http://192.168.56.110
-```
-
-Expected HTTP response:
-
-```text
-Hello from app1
-```
-
-The Host header allows testing without modifying DNS or `/etc/hosts`.
-
+For the architecture, development workflow, and troubleshooting steps, see [DEVELOPER.md](DEVELOPER.md).
