@@ -1,15 +1,5 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install up stop status ui app
-
-help:
-	@echo "make install — install Docker, k3d and kubectl"
-	@echo "make up      — start the cluster and configure Argo CD"
-	@echo "make stop    — stop the cluster without deleting it"
-	@echo "make status  — show cluster and application status"
-	@echo "make ui      — forward Argo CD to https://localhost:9090"
-	@echo "make app     — forward the application to http://localhost:8888"
-	@echo "make password -- print the initial Argo CD admin password"
 install:
 	sudo bash scripts/install.sh
 
@@ -36,3 +26,14 @@ app:
 password:
 	kubectl --context=k3d-iot -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 --decode
 	@echo
+
+help:
+	@echo "make install -- install Docker, k3d and kubectl"
+	@echo "make up -- start the cluster and configure Argo CD"
+	@echo "make stop -- stop the cluster without deleting it"
+	@echo "make status -- show cluster and application status"
+	@echo "make ui -- forward Argo CD to https://localhost:9090"
+	@echo "make app -- forward the application to http://localhost:8888"
+	@echo "make password -- print the initial Argo CD admin password"
+
+.PHONY: help install up stop status ui app password
