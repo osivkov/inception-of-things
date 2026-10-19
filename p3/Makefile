@@ -9,7 +9,7 @@ help:
 	@echo "make status  — show cluster and application status"
 	@echo "make ui      — forward Argo CD to https://localhost:9090"
 	@echo "make app     — forward the application to http://localhost:8888"
-
+	@echo "make password -- print the initial Argo CD admin password"
 install:
 	sudo bash scripts/install.sh
 
@@ -29,3 +29,10 @@ ui:
 
 app:
 	kubectl --context=k3d-iot -n dev port-forward svc/playground 8888:8888
+
+# Print the initial admin password generated for this Argo CD installation.
+# Secret values use Base64 encoding; decoding does not decrypt them.
+# After changing the admin password, this initial value is no longer valid.
+password:
+	kubectl --context=k3d-iot -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 --decode
+	@echo
