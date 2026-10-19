@@ -1,64 +1,31 @@
 # Inception of Things (IoT)
 
-A learning project about Vagrant, K3s, and HTTP routing in Kubernetes. The project runs inside a Debian 13 VM: Vagrant uses the libvirt provider to create nested VMs on QEMU/KVM.
+Three Kubernetes setups built inside a Debian 13 VM. P1 and P2 use Vagrant and libvirt to create guest VMs. P3 runs K3d in Docker and uses Argo CD to deploy an app from GitHub.
 
-## The project in one minute
+## How the parts fit together
 
-P2 creates one Debian VM with the private IP `192.168.56.110`. Provisioning installs a single-node K3s cluster and deploys three small websites. Traefik reads the HTTP Host header: `app1.com` goes to app1, `app2.com` goes to app2, and every other Host goes to app3. App2 has three Pod replicas.
-
-```text
-Outer Debian VM
-  └─ Vagrant + libvirt → osivkovS (192.168.56.110)
-                         └─ K3s → Traefik → app1 / app2 / app3
-```
-
-If you are returning to the project after a break, read [Quick start](#quick-start), then [P2: verify](#p2-verify). [DEVELOPER.md](DEVELOPER.md) explains what each component does and how to change it.
-
-## Project status
-
-| Part | Status based on repository files |
+| Part | What it runs |
 | --- | --- |
-| P1 | Server and worker configuration is present; the previous README reported both nodes as Ready |
-| P2 | Three applications, three app2 replicas, and an Ingress are configured; the current cluster state still needs runtime verification |
-| P3 | Not implemented |
+| P1 | Two VMs: a K3s server at `192.168.56.110` and an agent at `192.168.56.111` |
+| P2 | One K3s VM with three HTTP apps; `app2` has three replicas, and Traefik routes by Host |
+| P3 | One K3d cluster with Argo CD in `argocd` and `wil42/playground` in `dev` |
 
-P2 was reviewed from source files only. No VM, K3s cluster, or application was started during this review.
+Start with the part you want to run below. [DEVELOPER.md](DEVELOPER.md) has the wiring behind each setup.
 
-## P2 requirements checklist
-
-| Requirement | Evidence in the repository |
-| --- | --- |
-| One VM named after a team login with an S suffix | `p2/Vagrantfile` defines only `osivkovS` |
-| Private IP `192.168.56.110` | `p2/Vagrantfile` and `p2/confs/iotnet.xml` |
-| K3s in server mode | `p2/scripts/server.sh` installs and starts K3s |
-| Three web applications | `p2/confs/app1.yaml`, `app2.yaml`, and `app3.yaml` |
-| Three replicas of application 2 | `p2/confs/app2.yaml` sets `replicas: 3` |
-| Host-based routing and app3 as the default | `p2/confs/ingress.yaml` has rules for `app1.com`, `app2.com`, and a rule without a Host |
-
-All required P2 components are present in the source files. A static review cannot confirm that provisioning succeeds, images can be pulled, Pods become ready, or HTTP requests return the expected responses.
+One P3 detail is still open: the repository is named `inception-of-things`, while the assignment asks for a team login in the **repository name**. `osivkov` currently appears only as the owner. If you rename or replace the repository, update `repoURL` in `p3/confs/argocd-application.yaml` too.
 
 ## Repository layout
 
 ```text
-Makefile                 Prepare, check, and manage VMs
-scripts/                 Prepare and check the outer Debian VM
-p1/
-  Vagrantfile            Two VMs: server and worker
-  scripts/               K3s installation
-  confs/                 Network configuration and public SSH key
-p2/
-  Vagrantfile            One VM: K3s server
-  scripts/server.sh      K3s installation and manifest deployment
-  confs/iotnet.xml       Private libvirt network
-  confs/app1.yaml        HTML page, Deployment, and Service for app1
-  confs/app2.yaml        Deployment and Service for app2
-  confs/app3.yaml        Deployment and Service for app3
-  confs/ingress.yaml     Traefik HTTP routes
-p3/                     Empty for now
-DEVELOPER.md             Development and verification guide
+Makefile       P1/P2 VM commands
+scripts/       Shared P1/P2 host preparation and checks
+p1/           Two Vagrant VMs and K3s server/agent scripts
+p2/           One Vagrant VM, three apps, and an Ingress
+p3/           K3d, Argo CD, and the Git-managed playground app
+DEVELOPER.md  Configuration and troubleshooting details
 ```
 
-## Environment requirements
+## Before running P1 or P2
 
 - A Debian 13 VM with nested hardware virtualization available.
 - Vagrant, the `vagrant-libvirt` plugin, QEMU/KVM, and system libvirt (`qemu:///system`).
@@ -73,9 +40,62 @@ To check the EPT setting after rebooting the outer VM:
 cat /sys/module/kvm_intel/parameters/ept
 ```
 
-The expected value for this setup is `N`. The setting is saved in `/etc/modprobe.d/iot-kvm.conf`. This is a local workaround for nested virtualization and may reduce performance.
+For this setup, the value should be `N`. The setting is saved in `/etc/modprobe.d/iot-kvm.conf`. This local workaround for nested virtualization may reduce performance.
 
-## Quick start
+## P1 quick start
+
+Run from the repository root inside the outer Debian VM. P1 needs a matching `p1/confs/cluster_key` and `p1/confs/cluster_key.pub` pair before provisioning. The key files are ignored by Git. If the private key is absent, create the pair locally:
+
+```bash
+if [ ! -f p1/confs/cluster_key ]; then
+  ssh-keygen -t ed25519 -N '' -f p1/confs/cluster_key
+fi
+if [ ! -f p1/confs/cluster_key.pub ]; then
+  ssh-keygen -y -f p1/confs/cluster_key > p1/confs/cluster_key.pub
+fi
+```
+
+Keep an existing private key; the commands above generate only missing files. Stop P2 first if it is running: the P1 and P2 servers share `192.168.56.110`.
+
+```bash
+make up PART=p1
+cd p1
+vagrant ssh osivkovS -c 'sudo k3s kubectl get nodes -o wide'
+```
+
+The node list should contain the server and worker, both `Ready`. To stop both VMs from `p1`, run `vagrant halt`. The [P1 implementation notes](DEVELOPER.md#p1-two-node-k3s-cluster) explain how the worker joins the server.
+
+## P1: start
+
+The root `Makefile` accepts `PART=p1` and defaults to `p2`. From the repository root:
+
+```bash
+make prepare PART=p1
+make check PART=p1
+make up PART=p1
+make status PART=p1
+```
+
+`make up` already runs `prepare` and `check`. The separate commands are useful when diagnosing the outer VM. Preparation configures the nested-KVM EPT workaround and the `iotnet` libvirt network. Vagrant then creates both Debian VMs and provisions their shared setup, server, and worker scripts. The worker fetches the K3s join token over SSH from the server; it does not use the local `p1/confs/node-token` file.
+
+## P1: verify
+
+Run from `p1` inside the outer VM:
+
+```bash
+vagrant status
+vagrant ssh osivkovS -c 'hostname; ip -4 addr show'
+vagrant ssh osivkovSW -c 'hostname; ip -4 addr show'
+vagrant ssh osivkovS -c 'sudo k3s kubectl get nodes -o wide'
+vagrant ssh osivkovS -c 'sudo systemctl is-active k3s'
+vagrant ssh osivkovSW -c 'sudo systemctl is-active k3s-agent'
+```
+
+Check the hostnames and private addresses against the P1 requirements, confirm both services are active, and confirm both Kubernetes nodes are `Ready`. `vagrant ssh` should connect without asking for a VM password. The worker-to-server SSH path used for the join token can be checked with `vagrant ssh osivkovSW -c 'ssh -o BatchMode=yes vagrant@192.168.56.110 hostname'`.
+
+If the worker is missing from `kubectl get nodes`, inspect `vagrant ssh osivkovSW -c 'sudo systemctl status k3s-agent --no-pager'` and its provisioning output. The server script makes a brief, nonfatal `kubectl get nodes` attempt; successful VM provisioning alone does not prove both nodes are ready.
+
+## P2 quick start
 
 Run these commands from the **repository root inside the outer Debian VM** after installing the tools listed above. Stop the P1 server first if it is running, because P1 and P2 share the same private IP.
 
@@ -91,8 +111,6 @@ The deployment list should include app1, app2, and app3; app2 should show `3/3` 
 ```bash
 vagrant halt
 ```
-
-The commands above describe the expected workflow; they have not been executed as part of this review.
 
 ## P2: start
 
@@ -145,7 +163,7 @@ curl -fsS --max-time 10 -H 'Host: unknown.example' http://192.168.56.110/
 | `app2.com` | `Hello from app2` | 3 |
 | Any other Host | `Hello from app3` | 1 |
 
-The Host header lets you test the routes without DNS or `/etc/hosts`. During the defense, also show the Ingress and app2 replica count with `sudo k3s kubectl describe ingress apps` and `sudo k3s kubectl get deployment app2` inside the VM.
+The Host header lets you test the routes without DNS or `/etc/hosts`. To show the routing and replica count, run `sudo k3s kubectl describe ingress apps` and `sudo k3s kubectl get deployment app2` inside the VM.
 
 If verification fails, check the VM and Pod status first:
 
@@ -157,6 +175,78 @@ vagrant ssh osivkovS -c 'sudo k3s kubectl get pods -A'
 
 All application Pods should be `Running`, and the app2 Deployment should show `3/3` ready replicas. The HTTP requests also verify the Services and Ingress routing.
 
+## P3 quick start
+
+Run P3 commands from the `p3` directory **inside the outer Debian VM**. P3 uses Docker and K3d on that VM; it does not create a Vagrant guest. The root `Makefile` manages P1/P2 Vagrant VMs, so use `p3/Makefile` for P3.
+
+```bash
+cd p3
+make install
+```
+
+If the installer added your user to the `docker` group, log out of the Debian VM and back in. Then return to `p3` and continue:
+
+```bash
+cd ~/inception-of-things/p3
+make up
+make status
+```
+
+`make install` needs `sudo` and internet access. It installs Docker, K3d, and kubectl; the script verifies the downloaded K3d and kubectl checksums. Run `make up` as a user who can access Docker (`docker info` must succeed). `make up` creates or starts the `iot` cluster, applies the two namespaces, installs Argo CD, creates its Application, and waits for `Synced` and `Healthy` status. It also selects the `k3d-iot` kubectl context. Use `make stop` to stop the cluster without deleting it.
+
+## P3: architecture and repository
+
+K3d runs K3s nodes inside Docker containers. Argo CD runs in the `argocd` namespace. Its `playground` Application is configured to read `https://github.com/osivkov/inception-of-things.git`, branch `main`, directory `p3/confs/application`, and deploy that directory's Deployment and Service to the `dev` namespace. The repository must be publicly readable. Automated sync, pruning, and self-healing are configured in `p3/confs/argocd-application.yaml`.
+
+```text
+GitHub main:p3/confs/application/
+        │
+        ▼
+Argo CD Application (namespace argocd)
+        │ automatic sync
+        ▼
+Deployment + Service playground (namespace dev)
+        │
+        ▼
+wil42/playground:v2 on port 8888
+```
+
+The tracked Deployment currently requests `wil42/playground:v2`. The application has a single replica and its Service is internal (`ClusterIP`). Use `make app` to forward local port `8888` to the Service. `p3/confs/cluster.yaml` also maps host `127.0.0.1:8080` to load-balancer port `80`, but P3 defines no Ingress for `playground`; that mapping is not the documented application access path.
+
+## P3: verify and access
+
+From `p3`, inspect the cluster and the two namespaces:
+
+```bash
+make status
+kubectl --context=k3d-iot get namespaces argocd dev
+kubectl --context=k3d-iot -n argocd get application playground
+kubectl --context=k3d-iot -n dev get deployment,service,pods
+kubectl --context=k3d-iot -n dev get deployment playground -o jsonpath='{.spec.template.spec.containers[0].image}'
+echo
+```
+
+Expect the Application to report `Synced` and `Healthy`, one ready `playground` replica in `dev`, and the image tag currently committed to GitHub. To view the Argo CD UI, run `make ui` in one terminal and open `https://localhost:9090` in the VM. Sign in as `admin`; `make password` prints the initial password from the Argo CD Secret. The UI uses a locally generated certificate, so the browser may display a certificate warning. The initial password may no longer work after it has been changed.
+
+To request the application, run `make app` in another terminal and then, from the same VM:
+
+```bash
+curl -fsS http://localhost:8888/
+```
+
+The response should report the deployed version, for example `"message": "v2"` for the currently tracked image. Both `make ui` and `make app` keep their terminals occupied until you stop the port-forward with Ctrl-C.
+
+## P3: change the version through Git
+
+Argo CD reads the **pushed** `main` branch. A local edit alone will not change the cluster. Starting from the tracked `v2`, switch to `v1` and back:
+
+1. Change only the `image:` line in `p3/confs/application/deployment.yaml` from `wil42/playground:v2` to `wil42/playground:v1`.
+2. Commit and push that change to `main` in the public GitHub repository. Choose the commit message yourself.
+3. Wait for Argo CD to observe the new revision and report `Synced` and `Healthy`. Check the Deployment image, Pod readiness, and `curl http://localhost:8888/`; the response should now report `v1`.
+4. Change the same image line back to `wil42/playground:v2`, commit and push, then repeat the checks for `v2`.
+
+Argo CD polls Git, so the update may take a few minutes. You can watch progress with `kubectl --context=k3d-iot -n argocd get application playground -w` (Ctrl-C to stop). Check the image actually deployed before interpreting the HTTP response. The procedure changes the Git-managed manifest; applying a local Deployment directly to Kubernetes would not demonstrate the required GitOps update.
+
 ## Network and VM resources
 
 | Part | VM | Role | Private IP | vCPUs | RAM |
@@ -165,16 +255,4 @@ All application Pods should be `Running`, and the app2 Deployment should show `3
 | P1 | `osivkovSW` | K3s agent | `192.168.56.111` | 1 | 1024 MiB |
 | P2 | `osivkovS` | K3s server | `192.168.56.110` | 3 | 3072 MiB |
 
-Each VM has a Vagrant management interface and a private `eth1` interface. The `iotnet` network uses `192.168.56.0/24`, the `virbr56` bridge, and `192.168.56.1` as its gateway. In P2, K3s uses `192.168.56.110` as its node IP and `eth1` for Flannel.
-
-## P1: local SSH key
-
-P1 provisioning needs `p1/confs/cluster_key` and `p1/confs/cluster_key.pub`. If the private key is missing after cloning, create a new pair:
-
-```bash
-ssh-keygen -t ed25519 -N '' -f p1/confs/cluster_key
-```
-
-The private key is excluded from Git. The worker retrieves the K3s join token from the server over SSH; the current scripts do not use a local `confs/node-token` file.
-
-For the architecture, development workflow, and troubleshooting steps, see [DEVELOPER.md](DEVELOPER.md).
+Each VM has a Vagrant management interface and an additional private interface. The `iotnet` network uses `192.168.56.0/24`, the `virbr56` bridge, and `192.168.56.1` as its gateway. In P2, K3s uses `192.168.56.110` as its node IP and the script selects `eth1` for Flannel.
