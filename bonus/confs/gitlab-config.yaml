@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gitlab-settings
+  namespace: gitlab
+data:
+  GITLAB_OMNIBUS_CONFIG: |
+    external_url 'http://gitlab.local'
+    letsencrypt['enable'] = false
+
+
+    puma['worker_processes'] = 0
+    sidekiq['concurrency'] = 10
+    prometheus_monitoring['enable'] = false
+    
