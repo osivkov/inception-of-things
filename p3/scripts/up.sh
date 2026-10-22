@@ -43,16 +43,17 @@ done
 kubectl -n argocd rollout status \
   statefulset/argocd-application-controller --timeout=300s
 
-# Let Argo CD deply the application from Git.
+# Configure the P3 application unless another script handles it.
+if [[ "${SKIP_APPLICATION:-false}" != "true" ]]; then
+  kubectl apply -f "$P3_DIR/confs/argocd-application.yaml"
 
-kubectl apply -f "$P3_DIR/confs/argocd-application.yaml"
-kubectl -n argocd wait application/playground \
-  --for=jsonpath='{.status.sync.status}'=Synced \
-  --timeout=300s
+  kubectl -n argocd wait application/playground \
+    --for=jsonpath='{.status.sync.status}'=Synced \
+    --timeout=300s
 
-kubectl -n argocd wait application/playground \
-  --for=jsonpath='{.status.health.status}'=Healthy \
-  --timeout=300s
+  kubectl -n argocd wait application/playground \
+    --for=jsonpath='{.status.health.status}'=Healthy \
+    --timeout=300s
 
-kubectl get applications -n argocd
-
+  kubectl get applications -n argocd
+fi
