@@ -1,0 +1,6 @@
+apiVersion: v2
+name: gitlab
+description: Local GitLab for the IoT
+type: application
+version: 0.1.0
+appVersion: "19.5.0-ce.0"
