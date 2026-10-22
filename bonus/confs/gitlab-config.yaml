@@ -5,11 +5,12 @@ metadata:
   namespace: gitlab
 data:
   GITLAB_OMNIBUS_CONFIG: |
-    external_url 'http://gitlab.local'
+    external_url 'http://gitlab.local:8080'
+    nginx['listen_port'] = 80
     letsencrypt['enable'] = false
 
 
     puma['worker_processes'] = 0
     sidekiq['concurrency'] = 10
     prometheus_monitoring['enable'] = false
-    
+
