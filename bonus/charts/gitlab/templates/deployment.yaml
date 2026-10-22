@@ -45,7 +45,7 @@ spec:
                 - --max-time
                 - "3"
                 - --header
-                - "Host: gitlab.local"
+                - "Host: localhost"
                 - http://127.0.0.1/-/readiness
             initialDelaySeconds: 30
             periodSeconds: 10

@@ -3,4 +3,4 @@ service:
   targetPort: http
 image:
   repository: gitlab/gitlab-ce
-  tag: "19.5.0-ce.0"
+  tag: "19.5.1-ce.0"
