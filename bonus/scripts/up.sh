@@ -26,6 +26,8 @@ helm upgrade --install gitlab "$BONUS_DIR/charts/gitlab" \
   --wait \
   --timeout 10m
 
+python3 "$BONUS_DIR/scripts/bootstrap-gitlab.py"
+
 # Point Argo CD at the repository hosted by GitLab.
 "${KUBECTL[@]}" apply -f "$BONUS_DIR/confs/argocd-application.yaml"
 
