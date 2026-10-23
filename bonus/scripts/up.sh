@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Accept an optional first-install mode.
+SETUP_ONLY=false
+
+case "${1:-}" in
+  "")
+    ;;
+  --setup-only)
+    SETUP_ONLY=true
+    ;;
+  *)
+    echo "Usage: bash bonus/scripts/up.sh [--setup-only]"
+    exit 1
+    ;;
+esac
+
 BONUS_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_DIR="$(dirname -- "$BONUS_DIR")"
 
@@ -25,6 +40,14 @@ helm upgrade --install gitlab "$BONUS_DIR/charts/gitlab" \
   --namespace gitlab \
   --wait \
   --timeout 10m
+
+# Stop here when preparing a fresh GitLab installation.
+if [[ "$SETUP_ONLY" == "true" ]]; then
+  echo "GitLab is ready at http://localhost:8080"
+  echo "Log in and create a personal access token with the api scope."
+  echo "Then run: bash bonus/scripts/up.sh"
+  exit 0
+fi
 
 python3 "$BONUS_DIR/scripts/bootstrap-gitlab.py"
 
