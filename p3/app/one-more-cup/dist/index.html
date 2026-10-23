@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#f5f1e8">
+<title>One more cup — a little time for yourself</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='50' font-size='50'%3E☕%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="shell">
+<header>
+<a href="./" class="brand">
+<span class="brand-icon">☕</span> one more cup<span class="brand-dot">.</span>
+</a>
+<span class="release" id="release">loading…</span>
+</header>
+<main>
+<noscript>
+<p class="notice">Enable JavaScript to use the timer and task list.</p>
+</noscript>
+<div class="notice error" id="load-error" role="alert" hidden>
+<p>We couldn’t load the app. Check your connection and try again.</p>
+<button type="button" id="retry-load">Try again</button>
+</div>
+<p class="notice" id="storage-message" role="status" hidden>Your browser could not read or save some data. Changes may be lost when you close this page.</p>
+<div class="intro">
+<span class="eyebrow">FOCUS, THEN TAKE A BREAK</span>
+<h1>Make time for one thing.<br>
+<em>Then take a break.</em>
+</h1>
+<p>Choose a task, set a timer, and take a proper break when you finish.</p>
+</div>
+<fieldset class="app-controls" id="app-controls" disabled>
+<legend class="sr-only">Timer and tasks</legend>
+<div class="workspace">
+<section class="timer-card" aria-label="Timer">
+<div class="card-top">
+<span class="small-label">TAKE YOUR TIME</span>
+<span class="live-dot" id="state">ready when you are</span>
+</div>
+<div class="modes" role="group" aria-label="Timer mode">
+<button data-mode="focus" aria-pressed="true">Focus</button>
+<button data-mode="short" aria-pressed="false">Short break</button>
+<button data-mode="long" aria-pressed="false" id="long">Long break</button>
+</div>
+<div class="focus-plan" id="focus-plan">
+<label for="focus-task">THIS SESSION IS FOR</label>
+<select id="focus-task" aria-label="Task for this focus session">
+<option value="">A little uninterrupted time</option>
+</select>
+<div class="length-row">
+<span>Make room for</span>
+<div role="group" aria-label="Focus duration">
+<button data-minutes="15" aria-pressed="false">15 min</button>
+<button data-minutes="25" aria-pressed="true">25 min</button>
+<button data-minutes="45" aria-pressed="false">45 min</button>
+</div>
+</div>
+<p id="plan-hint">Pick a task, or simply take some time to focus.</p>
+</div>
+<div class="break-note" id="break-note" hidden>Step away for a moment. Your next task can wait.</div>
+<div class="dial" id="dial">
+<div class="dial-inner">
+<span class="timer-kicker" id="kicker">ONE THING AT A TIME</span>
+<div class="time" id="time" role="timer" aria-label="Time remaining">25:00</div>
+<span id="timer-note">Everything else can wait a little</span>
+</div>
+</div>
+<section class="finish-card" id="finish-card" hidden aria-labelledby="finish-title" tabindex="-1">
+<span class="small-label">SESSION COMPLETE</span>
+<h2 id="finish-title">Nice work.</h2>
+<p id="finish-copy">
+</p>
+<p class="delivery-note" id="finish-delivery">
+</p>
+<div class="finish-actions">
+<button id="finish-primary">Take a 5 min break</button>
+<button id="finish-task" hidden>Mark task as done</button>
+</div>
+</section>
+<div class="timer-controls" id="timer-controls">
+<button class="start" id="start">
+<span id="start-label">Start</span> <span id="start-symbol" aria-hidden="true">↗</span>
+</button>
+<button class="reset" id="reset" aria-label="Reset timer" title="Start over">↺</button>
+</div>
+<div class="timer-footer">
+<span>✳ <span id="sessions">0</span> focus sessions today</span>
+<span>one step at a time</span>
+</div>
+</section>
+<aside>
+<section class="note-card">
+<div class="note-heading">
+<h2>For today</h2>
+<span id="count">0 / 0</span>
+</div>
+<p class="muted">Add a task, then choose it for your next focus session.</p>
+<form id="task-form">
+<input id="task-input" maxlength="100" autocomplete="off" placeholder="Add a task" aria-label="New task" required>
+<button aria-label="Add task">+</button>
+</form>
+<ul id="tasks">
+</ul>
+<p class="empty" id="empty">No tasks yet.<br>Add one to plan your next session.</p>
+<div class="paper-bottom">
+<span>Plans can change.</span>
+<span>that’s okay ♡</span>
+</div>
+</section>
+<section class="cup-card">
+<svg viewBox="0 0 260 150" aria-hidden="true">
+<path d="M107 35c-15-16 12-19 0-34M129 38c-15-16 12-19 0-34M151 35c-15-16 12-19 0-34" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".4"/>
+<ellipse cx="130" cy="128" rx="75" ry="8" fill="currentColor" opacity=".08"/>
+<path d="M80 58h91v36c0 38-91 38-91 0z" fill="none" stroke="currentColor" stroke-width="3"/>
+<path d="M171 65h13c29 0 22 39-13 35" fill="none" stroke="currentColor" stroke-width="3"/>
+<ellipse cx="125.5" cy="58" rx="45.5" ry="10" fill="var(--cup-bg)" stroke="currentColor" stroke-width="3"/>
+<ellipse cx="125.5" cy="59" rx="35" ry="5" fill="currentColor" opacity=".2"/>
+</svg>
+<div>
+<span class="handwritten">Time for a<br>fresh cup.</span>
+<p>Remember to take a sip.</p>
+</div>
+</section>
+<section class="reminder-card" aria-labelledby="reminder-heading">
+<div>
+<span class="reminder-icon" aria-hidden="true">♧</span>
+<h2 id="reminder-heading">Session reminders</h2>
+<span class="notification-badge" id="notification-state">Off</span>
+</div>
+<p id="notification-status" role="status">Get a browser notification when a session ends.</p>
+<div class="notification-actions">
+<button type="button" id="enable-notifications">Enable notifications</button>
+<button type="button" id="test-notification" hidden>Send a test notification</button>
+</div>
+<p class="reminder-footnote">Keep this page open. A message will also appear here when your timer ends.</p>
+</section>
+</aside>
+</div>
+</fieldset>
+<div class="bottom-line">
+<span>Less rush. More room for you.</span>
+<span id="edition">FIRST BREW / 001</span>
+</div>
+</main>
+<footer>
+<span>Your tasks stay in this browser.</span>
+<button id="clear">Clear completed tasks</button>
+</footer>
+<div class="toast" id="toast" role="status" aria-live="polite">
+</div>
+</div>
+<div class="sr-only" id="completion-announcement" role="status" aria-live="polite" aria-atomic="true">
+</div>
+<script type="module" src="app.js">
+</script>
+</body>
+</html>
