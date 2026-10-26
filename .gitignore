@@ -8,6 +8,8 @@ cluster_key.pub
 
 #Local environment files
 .env
+.env.*
+!.env.example
 
 
 #VirtualBox logs
