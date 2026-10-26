@@ -4,7 +4,7 @@ metadata:
   name: gitlab-config
   namespace: {{ .Release.Namespace }}
   annotations:
-    helm.sh/resources-policy: keep
+    helm.sh/resource-policy: keep
 spec:
   accessModes:
    - ReadWriteOnce

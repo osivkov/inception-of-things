@@ -33,7 +33,7 @@ For P3/bonus, start the documented VM-local port forwards, then tunnel their loo
 ssh -L 9090:127.0.0.1:9090 -L 8888:127.0.0.1:8888 -L 8080:127.0.0.1:8080 osivkov@DEBIAN_VM_ADDRESS
 ```
 
-The tunnel alone does not start a Kubernetes Service port forward. Port `8080` is the K3d load balancer mapping used by the GitLab Ingress; `9090` and `8888` need the `make ui` and `make app` commands on the Debian VM. Use free local ports or change the left side of an `-L` mapping.
+The tunnel alone does not start a Kubernetes Service port forward. Port `8080` is the K3d load balancer mapping used by the P3 app Ingress (`Host: cup.localhost`) and GitLab Ingress (`Host: localhost`); `9090` and `8888` need the `make ui` and `make app` commands on the Debian VM. Use free local ports or change the left side of an `-L` mapping.
 
 ## Prerequisites
 
@@ -114,7 +114,7 @@ kubectl --context=k3d-iot -n argocd get application playground -o wide
 kubectl --context=k3d-iot -n dev get deployment,service,pods
 ```
 
-**Expected when P3 is selected:** `argocd` and `dev` namespaces, one ready `playground` replica, and Application `Synced/Healthy` with source `https://github.com/osivkov/inception-of-things.git`, branch `main`, path `p3/confs/application`. The checked-in Deployment uses `osivkov/one-more-cup:v2` on port `8888`. The Kubernetes resource is still named `playground`.
+**Expected when P3 is selected:** `argocd` and `dev` namespaces, one ready `playground` replica, and Application `Synced/Healthy` with source `https://github.com/osivkov/inception-of-things.git`, branch `main`, path `p3/confs/application`. The checked-in Deployment uses `osivkov/one-more-cup:v1` on port `8888`. The Kubernetes resource is still named `playground`.
 
 In separate Debian VM terminals, from `p3` run `make ui` and `make app`. Open `https://localhost:9090` for Argo CD (`admin` and the locally stored initial password if still valid) and `http://localhost:8888/` for One More Cup. From Codam use the SSH tunnel above. `make password` prints a secret; run it privately only when needed. The Argo CD certificate may be self-signed. Check the release and HTTP health from another Debian VM terminal:
 
@@ -123,9 +123,9 @@ curl -fsS http://127.0.0.1:8888/version.json
 curl -fsS http://127.0.0.1:8888/healthz
 ```
 
-Expect `{"version":"v2"}` and `ok` for the checked-in v2 manifest. Both `make ui` and `make app` run until Ctrl-C. The app's source and Dockerfile are in `p3/app/one-more-cup/`; its two published Docker Hub tags are `osivkov/one-more-cup:v1` and `osivkov/one-more-cup:v2`. V1 has a green theme and `FIRST BREW / 001` label; v2 has a terracotta theme and `SLOW ROAST / 002` label. Both expose the same timer and task features. Their `/version.json` responses distinguish the releases over HTTP.
+Expect `{"version":"v1"}` and `ok` for the checked-in v1 manifest. Both `make ui` and `make app` run until Ctrl-C. The app's source and Dockerfile are in `p3/app/one-more-cup/`; its two Docker Hub tags are `osivkov/one-more-cup:v1` and `osivkov/one-more-cup:v2`. V1 has a green theme and `FIRST BREW / 001` label; v2 has a terracotta theme and `SLOW ROAST / 002` label. Both expose the same timer and task features. Their `/version.json` responses distinguish the releases over HTTP.
 
-To demonstrate GitOps, change the image tag in `p3/confs/application/deployment.yaml` from `v2` to `v1`, commit and push to GitHub `main`, then verify the Application revision, Deployment image, rollout, and `/version.json` response. Repeat with `v2` to show the reverse update. A local edit alone does not update Argo CD.
+To demonstrate GitOps, change the image tag in `p3/confs/application/deployment.yaml` from `v1` to `v2`, commit and push to GitHub `main`, then verify the Application revision, Deployment image, rollout, and `/version.json` response. Repeat with `v1` to show the reverse update. A local edit alone does not update Argo CD. The app also has an Ingress on K3d port `8080`; check it with `curl -H 'Host: cup.localhost' http://127.0.0.1:8080/version.json`.
 
 ```bash
 # Debian VM, p3 directory:
@@ -156,9 +156,9 @@ kubectl --context=k3d-iot -n argocd get application playground -o wide
 kubectl --context=k3d-iot -n dev get deployment,service,pods
 ```
 
-**Expected:** GitLab Deployment `1/1`, three bound PVCs, GitLab HTTP on `localhost:8080`, and `playground` `Synced/Healthy` from `http://gitlab.gitlab.svc.cluster.local/osivkov/iot.git` at branch `main`, path `.`. The GitLab project's `deployment.yaml` currently selects `osivkov/one-more-cup:v2`; edit and commit that file in GitLab to demonstrate a bonus version update. Editing `bonus/confs/application/deployment.yaml` locally does not change an existing GitLab project. Use `curl -H 'Host: localhost' http://127.0.0.1:8080/` if checking the loopback IP: the Ingress only matches Host `localhost`. `bootstrap-gitlab.py` prompts for the token and seeds two manifests only when the repository is empty. If the project already has commits, inspect its `main` branch yourself; rerunning bootstrap will not update it. The `GITLAB_GROUP` and `GITLAB_PROJECT` environment overrides do not update the hard-coded Argo CD URL.
+**Expected:** GitLab Deployment `1/1`, three bound PVCs, GitLab HTTP on `localhost:8080`, and `playground` `Synced/Healthy` from `http://gitlab.gitlab.svc.cluster.local/osivkov/iot.git` at branch `main`, path `.`. The checked-in seed `bonus/confs/application/deployment.yaml` selects `osivkov/one-more-cup:v1`; edit and commit `deployment.yaml` in the GitLab project to demonstrate a bonus version update. Editing the local seed does not change an existing GitLab project. Use `curl -H 'Host: localhost' http://127.0.0.1:8080/` if checking the loopback IP: the GitLab Ingress only matches Host `localhost`. `bootstrap-gitlab.py` prompts for the token and seeds two manifests only when the repository is empty. If the project already has commits, inspect its `main` branch yourself; rerunning bootstrap will not update it. The `GITLAB_GROUP` and `GITLAB_PROJECT` environment overrides do not update the hard-coded Argo CD URL.
 
-**Current deployment (checked 2026-10-23):** the active Application source is the local GitLab project. Argo CD reports `Synced/Healthy`; the ready `dev/playground` Pod runs `osivkov/one-more-cup:v2` and serves `{"version":"v2"}` from `/version.json`. Both Docker Hub tags are published.
+The live GitLab project and active Argo CD source can differ from these checked-in files. Inspect the Application source, GitLab `main`, and running image before demonstrating the bonus.
 
 To switch sources in a **running** cluster without repeating installation, run `make source-p3` or `make source-bonus` from `p3` on the Debian VM. These targets apply the corresponding Application definition and request a hard refresh; confirm `.spec.source.repoURL` afterward. For a stopped cluster, use `make up` from `p3` to start with GitHub or `bash bonus/scripts/up.sh` from the repository root to start with GitLab. Do not run the setup commands concurrently. `--setup-only` leaves the current Application source as it was but still starts P3 and upgrades GitLab.
 

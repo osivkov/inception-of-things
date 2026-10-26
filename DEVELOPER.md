@@ -33,7 +33,6 @@ The Codam host has no `sudo`. Install system packages, run Vagrant and K3d, and 
 | `p1/scripts/worker.sh` | Retrieves join token by SSH, installs K3s agent on `.111` |
 | `p1/confs/iotnet.xml`, `p2/confs/iotnet.xml` | Identical `iotnet` NAT network definitions |
 | `p1/confs/cluster_key`, `.pub` | Ignored local SSH key pair, uploaded to both P1 guests; never publish the private key |
-| `p1/confs/node-token` | Ignored local file; no script consumes it |
 | `p2/Vagrantfile` | Defines one `osivkovS` guest, uploads `confs/`, runs server script |
 | `p2/scripts/server.sh` | Guest apt packages, pinned K3s server, node readiness, applies app1–3 and Ingress, waits for Deployments |
 | `p2/confs/app1.yaml` | ConfigMap with HTML, Nginx Deployment and Service |
@@ -47,7 +46,7 @@ The Codam host has no `sudo`. Install system packages, run Vagrant and K3d, and 
 | `p3/confs/namespaces.yaml` | `argocd` and `dev` Namespaces |
 | `p3/confs/argocd-install.yaml` | Vendored Argo CD v3.3.16 installation and CRDs; applied server-side |
 | `p3/confs/argocd-application.yaml` | GitHub source and automated sync for `argocd/playground` |
-| `p3/confs/application/*.yaml` | GitHub-managed Deployment and Service for `dev/playground` |
+| `p3/confs/application/*.yaml` | GitHub-managed Deployment, Service, and Ingress for `dev/playground` |
 | `p3/app/one-more-cup/` | Static application source, Dockerfile, release descriptors, container smoke check, and application tests |
 | `bonus/scripts/install-helm.sh` | Downloads checksum-verified Helm v4.3.1 binary and installs it with `sudo` |
 | `bonus/scripts/up.sh` | Starts P3 with `SKIP_APPLICATION=true`, upgrades Helm release, optionally bootstraps GitLab and switches Application source |
@@ -106,10 +105,10 @@ flowchart LR
 | --- | --- | --- |
 | P1 guest | libvirt `iotnet` NAT `192.168.56.0/24`, bridge `virbr56`, gateway `.1`; `.110` server API TCP 6443; `.111` agent; guest SSH via Vagrant management NIC | Two Nodes; K3s server and agent services |
 | P2 guest | Same `iotnet`; HTTP `192.168.56.110:80`; Traefik Ingress | In `default`: ConfigMap `app1-page`, Deployments and Services `app1/app2/app3`, Ingress `apps` |
-| P3/bonus VM | Docker/K3d network; K3d load balancer maps Debian VM `127.0.0.1:8080` to LB port 80 | `argocd`: Argo CD resources and Application `playground`; `dev`: Deployment and ClusterIP Service `playground` |
+| P3/bonus VM | Docker/K3d network; K3d load balancer maps Debian VM `127.0.0.1:8080` to LB port 80 | `argocd`: Argo CD resources and Application `playground`; `dev`: Deployment, ClusterIP Service, and Ingress `playground` |
 | Bonus | GitLab Ingress Host `localhost` via mapped `:8080`; internal Service `gitlab.gitlab.svc.cluster.local:80`; app Service `dev/playground:8888` | `gitlab`: Helm release `gitlab`, ConfigMap, Deployment, Service, Ingress and three PVCs |
 
-The P2 Ingress selects `app1.com` and `app2.com`; its rule without a Host routes other Hosts to `app3`. App1 listens on 80; app2/app3 containers listen on 5678 and their Services expose 80. All Services are `ClusterIP`. P3's application has no Ingress: `kubectl --context=k3d-iot -n dev port-forward svc/playground 8888:8888` on the Debian VM exposes it at `127.0.0.1:8888`. `kubectl --context=k3d-iot -n argocd port-forward svc/argocd-server 9090:443` exposes the Argo CD UI at `https://127.0.0.1:9090`.
+The P2 Ingress selects `app1.com` and `app2.com`; its rule without a Host routes other Hosts to `app3`. App1 listens on 80; app2/app3 containers listen on 5678 and their Services expose 80. All Services are `ClusterIP`. P3's application Ingress uses Host `cup.localhost` through K3d port `8080`; `curl -H 'Host: cup.localhost' http://127.0.0.1:8080/` checks it. Alternatively, `kubectl --context=k3d-iot -n dev port-forward svc/playground 8888:8888` on the Debian VM exposes it at `127.0.0.1:8888`. `kubectl --context=k3d-iot -n argocd port-forward svc/argocd-server 9090:443` exposes the Argo CD UI at `https://127.0.0.1:9090`.
 
 Use an explicit `--context=k3d-iot` for manual cluster queries. `p3/scripts/up.sh` changes the user's current kubectl context globally, which can surprise someone using another cluster. The P1/P2 guest `k3s kubectl` uses the guest's local K3s configuration. Do not paste or publish a complete kubeconfig.
 
@@ -129,7 +128,7 @@ sequenceDiagram
 
 P3's source is `https://github.com/osivkov/inception-of-things.git`, branch `main`, path `p3/confs/application`. Bonus changes **the same** Application to `http://gitlab.gitlab.svc.cluster.local/osivkov/iot.git`, branch `main`, path `.`. Both use project `default`, destination namespace `dev`, automated sync with prune and self-heal. The bootstrap script creates a public GitLab project `osivkov/iot` with `deployment.yaml` and `service.yaml` on `main` when that project is empty.
 
-The P3 and bonus manifests now declare one `playground` replica from `osivkov/one-more-cup:v2`. The resource names and `app: playground` selector are retained so the `ClusterIP` Service continues to target the Pod on port `8888`. One More Cup's source is in `p3/app/one-more-cup/`, while the public Docker Hub repository provides separate `v1` and `v2` images. The subject permits an own application with two visibly different versions; port `8888` is required for Wil's example and is also used here.
+The checked-in P3 manifests and bonus seed declare one `playground` replica from `osivkov/one-more-cup:v1`. An existing GitLab project may have a different image because bootstrap never overwrites a nonempty repository. The resource names and `app: playground` selector are retained so the `ClusterIP` Service continues to target the Pod on port `8888`. One More Cup's source is in `p3/app/one-more-cup/`, while the Docker Hub repository is expected to provide separate `v1` and `v2` images. The subject permits an own application with two visibly different versions; port `8888` is required for Wil's example and is also used here.
 
 Both images use the same static HTML, CSS, and JavaScript build context. The Dockerfile's `APP_VERSION` build argument copies either `releases/v1.json` or `releases/v2.json` into the image as `/version.json`. The client reads that file at startup: v1 uses green colors and the `FIRST BREW / 001` label; v2 uses terracotta colors and `SLOW ROAST / 002`. Timer and task behavior is the same in both releases. The HTTP responses are `{"version":"v1"}` and `{"version":"v2"}`. Changing an environment variable on an existing container does not change its built release.
 
@@ -148,7 +147,7 @@ docker push osivkov/one-more-cup:v2
 
 Republishing an existing tag changes what future pulls may receive; for a repeatable defense, retain the published v1/v2 contents after verification. For P3, change the image tag in `p3/confs/application/deployment.yaml`, commit, and push to the configured GitHub `main` branch. For bonus, edit and commit `deployment.yaml` in the existing GitLab project `osivkov/iot` on `main`. The files under `bonus/confs/application/` seed an **empty** project; bootstrap does not overwrite an existing project's manifests. After either change, verify the new Argo CD revision, ready Pod image, and `/version.json` through the Service. A local Docker image on the Debian VM is not automatically present in the K3d node; Kubernetes pulls the public image.
 
-On 2026-10-23, the active Application read the local GitLab repository, was `Synced/Healthy`, and managed one ready `dev/playground` Pod running `osivkov/one-more-cup:v2`. The Pod returned `{"version":"v2"}` from `/version.json`. Both Docker Hub tags resolved to different image digests.
+Before demonstrating a version change, inspect the active Application source, its revision, and the running image. The checked-in P3 manifests and GitLab seed do not prove the current state of a running cluster.
 
 ## Storage, backup and restore
 
@@ -177,7 +176,7 @@ The GitLab backup archive does not include `/etc/gitlab` secrets/configuration; 
 
 The root `Makefile` runs `prepare` and `check` before `vagrant up`. It does not install Vagrant/libvirt or create the P1 SSH key pair. An existing Vagrant guest may skip provisioning; use `vagrant provision` after changing guest scripts or manifests.
 
-`p3/scripts/up.sh` reuses or starts the `iot` cluster, reapplies namespaces and Argo CD, and selects the GitHub Application unless `SKIP_APPLICATION=true`. It also changes the current kubectl context to `k3d-iot`. `bonus/scripts/up.sh` invokes P3 setup with `SKIP_APPLICATION=true`, runs `helm upgrade --install`, then selects the GitLab Application after bootstrap. Run these setup commands sequentially and check the Application source afterward. In an already running cluster, `make source-p3` and `make source-bonus` from `p3` switch only the Application definition and request a hard refresh; they do not start the cluster or wait for sync.
+`p3/scripts/up.sh` reuses or starts the `iot` cluster, reapplies namespaces and Argo CD, and selects the GitHub Application unless `SKIP_APPLICATION=true`. It also changes the current kubectl context to `k3d-iot`. `bonus/scripts/up.sh` invokes P3 setup with `SKIP_APPLICATION=true`, runs `helm upgrade --install`, then selects the GitLab Application after bootstrap. Run these setup commands sequentially and check the Application source afterward. In an already running cluster, `make source-p3` and `make source-bonus` from `p3` switch the Application definition, request a hard refresh, and call `make verify` to wait for sync, health, and an HTTP response.
 
 The bootstrap script creates the project and initial commit only when the repository is empty. If the project already contains commits, update its manifests in GitLab. The application manifests also exist in `p3/confs/application/` and `bonus/confs/application/`; changes to one location do not update the other.
 
