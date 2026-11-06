@@ -1,6 +1,10 @@
 # Project internals and maintenance
 
-For the startup walkthrough, see the [README](README.md). This guide covers configuration changes, troubleshooting and rebuilding the lab.
+The [README](README.md) covers startup and evaluation. This file explains the configuration, how the parts fit together, and what to check when something fails.
+
+This project has been created as part
+of the 42 curriculum by
+The project was developed by **osivkov** and **iriadyns**. See the [README](README.md#contributors) for the contributor list.
 
 ## Repository map
 
@@ -33,11 +37,21 @@ scripts/
 └── check.sh                 # Prepared environment checks
 ```
 
-There is no root Makefile. Run `make -C p1 ...` from the root, or `make ...` inside `p1`; the same applies to P2/P3. `.vagrant`, `cluster_key*`, `.env` files and tokens are local state and are excluded from Git.
+### Makefiles
+
+Each part has a `Makefile` to group the commands needed for that environment. The Makefiles are a convenient interface to the provisioning scripts and cluster tools, not an additional infrastructure component.
+
+| Part | Main tasks |
+| --- | --- |
+| P1 | Generate guest SSH keys, prepare libvirt, start VMs, verify K3s nodes and inspect logs |
+| P2 | Prepare the VM, deploy three applications, test replicas and Ingress routes |
+| P3 | Install tools, manage the k3d cluster, access Argo CD and switch GitOps sources |
+
+For example, `make -C p1 up` prepares the P1 environment and then runs its verification checks. See each Makefile for the full list of targets.
 
 ## Resource allocation and versions
 
-VM resources are set in the Vagrantfiles; Kubernetes requests and limits are set in Deployments. These are separate layers: increasing a container limit does not add RAM to the outer VM.
+The Vagrantfiles set VM resources. Kubernetes requests and limits control container resources inside those VMs; changing a Pod limit does not increase the VM's RAM.
 
 | Configuration file | Current allocation |
 | --- | --- |
@@ -47,9 +61,9 @@ VM resources are set in the Vagrantfiles; Kubernetes requests and limits are set
 | `bonus/charts/gitlab/templates/deployment.yaml` | requests: 1 CPU / 2 GiB; limits: 4 CPU / 4 GiB; `/dev/shm`: memory-backed emptyDir up to 256 MiB |
 | `bonus/charts/gitlab/templates/storage.yaml` | PVCs: config 1 GiB, data 10 GiB, logs 2 GiB; StorageClass `local-path` |
 
-The P2 applications and One More Cup have no explicit requests or limits in their Deployments. Disk planning must also account for images, container writes and Argo CD components. The 13 GiB requested by GitLab PVCs does not cover all disk usage.
+The GitLab PVC capacities do not include image storage or other cluster data.
 
-The versions below come from the repository files. To change one, edit the source listed here, then check compatibility and release availability.
+The versions below are configured in the project files. Check compatibility before changing them.
 
 | Component | Value in the project | Source |
 | --- | --- | --- |
@@ -66,9 +80,9 @@ The versions below come from the repository files. To change one, edit the sourc
 | P2 app2/app3 | `hashicorp/http-echo:1.0.0` | `p2/confs/app2.yaml`, `app3.yaml` |
 | One More Cup | `osivkov/one-more-cup:v1`, with `v2` for the update demonstration | P3 Deployment and bonus seed Deployment |
 
-Docker is installed through Debian's `docker.io` package. Its version is not pinned in the script. The k3d, kubectl and Helm installers check downloads against published checksums.
+P3 uses Docker from Debian packages; K3s in P1/P2 uses its own container runtime.
 
-A new P1 installation may receive a different K3s release from P2/P3. This is a reproducibility limitation of the current scripts. Changing the K3s image in `cluster.yaml` does not upgrade an existing cluster: `up.sh` starts it again when it already exists. P2 also skips K3s installation when the binary is already present.
+P1 uses the version supplied by the K3s installer, while P2/P3 configure explicit versions. Updating `cluster.yaml` alone does not upgrade an existing k3d cluster.
 
 ## Networks and addresses
 
@@ -92,8 +106,6 @@ virsh -c qemu:///system net-list --all
 virsh -c qemu:///system net-dumpxml iotnet
 ip -br address
 ```
-
-Expected domain names are `p1_osivkovS`, `p1_osivkovSW` and `p2_osivkovS`. If the project directory or provider settings have changed, check the actual names with `virsh list --all`.
 
 P2 passes `--flannel-iface eth1` to K3s. When moving to another box, run `ip -br address` inside the VM and check the interface name. The selected interface must have `192.168.56.110`.
 
@@ -121,15 +133,15 @@ The second request requires GitLab to be running. Application access on 8888 doe
 
 ### P1
 
-`make up` calls `keys`, then `prepare`, `check`, `vagrant up --provider=libvirt` and `test`. The current Makefile does not pass `--no-parallel`.
+`make up` calls `keys`, then `prepare`, `check`, `vagrant up --provider=libvirt` and `test`. The Makefile uses Vagrant's default startup behavior.
 
-On both VMs, `common.sh` installs tools and SSH keys, adds hostnames to `/etc/hosts` and disables swap. `server.sh` installs K3s in server mode. `worker.sh` fetches `/var/lib/rancher/k3s/server/node-token` from the server over SSH and installs the agent with the API address and token. Token retrieval uses a bounded number of attempts; failure ends provisioning with an error.
+On both VMs, `common.sh` installs tools and SSH keys, adds hostnames to `/etc/hosts` and disables swap. `server.sh` installs K3s in server mode. `worker.sh` fetches `/var/lib/rancher/k3s/server/node-token` from the server over SSH and installs the agent with the API address and token. If the token cannot be read, worker provisioning fails.
 
 K3s inside the guests uses its own container runtime. P1/P2 do not require Docker on each node; Docker in the outer Debian VM is used by K3d for P3.
 
-Vagrant keeps its own SSH state in `.vagrant`. The `confs/cluster_key*` pair is a separate mechanism for guest-to-guest access. The `keys` target preserves an existing private key and derives its `.pub` file. P2 has no token exchange between VMs and does not copy this pair.
+The SSH key pair is used only for communication between the P1 guests. The Makefile creates it when required.
 
-The lab takes a few shortcuts: host key checking is disabled for `192.168.56.*`, and the server kubeconfig is created with mode `644`. Review these settings before using the setup on a shared or public server. An administrative kubeconfig is not configured automatically on the worker.
+This is a local lab, not a production setup. SSH host-key checking is disabled for `192.168.56.*`, and the server kubeconfig is readable by all local users (`644`). Do not copy these settings to a shared machine. The worker does not get an admin kubeconfig.
 
 ### P2
 
@@ -145,7 +157,7 @@ After editing the copied files, run `vagrant provision osivkovS` from `p2`. Edit
 
 A normal run applies the GitHub Application. The bonus calls the same script with `SKIP_APPLICATION=true`, installs GitLab with Helm and uses the GitLab API. `--setup-only` stops after GitLab becomes ready so the user can create a token. If an Application source was already configured, this mode preserves it.
 
-Startup scripts and `make verify` cover different checks. Running through `make -C p3 up` or `bonus-up` includes the final application verification. Calling `bonus/scripts/up.sh` directly checks Application sync and health, but does not run all HTTP checks from the Makefile.
+The `verify` target checks the deployed application after startup.
 
 ## GitOps and repositories
 
@@ -154,26 +166,13 @@ Startup scripts and `make verify` cover different checks. Running through `make 
 | P3 | `https://github.com/osivkov/inception-of-things.git` | `main` | `p3/confs/application` |
 | Bonus | `http://gitlab.gitlab.svc.cluster.local/osivkov/iot.git` | `main` | `.` |
 
-Both definitions describe **one** Application, `argocd/playground`, deploying to `dev`. Applying the other definition changes its source. Automated sync includes `prune` and `selfHeal`, so Argo CD reconciles resources with Git. A manual Deployment edit through kubectl does not replace a commit. See the [Argo CD sync policy](https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/) for details.
+Both definitions describe **one** Application, `argocd/playground`, deploying to `dev`. Applying the other definition changes its source. Automated sync includes `prune` and `selfHeal`, so Argo CD reconciles resources with Git. For a lasting change, commit the manifest to the repository Argo CD is watching rather than patching the Deployment manually. See the [Argo CD sync policy](https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/) for details.
 
-In the working repository, `origin` is used for GitHub and `vogsphere` for submission. A new Vogsphere clone may have a different `origin`. The Argo CD URL does not change automatically: check `git remote -v` and `spec.source.repoURL` before demonstrating an update.
+Argo CD reads the repository configured in `spec.source.repoURL`. Changes need to be committed and pushed there before the cluster can synchronize them.
 
 The bonus bootstrap creates a public group and project, then adds `deployment.yaml` and `service.yaml` in the first commit only when the repository is empty. It does not update an existing branch from the local seed files. `GITLAB_GROUP` and `GITLAB_PROJECT` change the bootstrap project's address, but the URL in `bonus/confs/argocd-application.yaml` remains explicitly configured.
 
 GitLab serves Git over HTTP in this setup. No separate GitLab SSH Service is exposed, and the P1 lab key pair is not needed for GitLab.
-
-## Before submission
-
-A fresh clone gets only committed files. The part Makefiles and `verify.sh` scripts must be tracked even if they already work on the local lab. Check tracked files and remaining changes with:
-
-```bash
-git status --short
-git diff --check
-git ls-files p1/Makefile p1/scripts/verify.sh p2/Makefile p2/scripts/verify.sh
-git remote -v
-```
-
-Push the submission commit to `vogsphere` and P3 GitOps changes to GitHub. These have different purposes. Local SSH keys will not appear in a clone: `cluster_key*` is deliberately ignored and generated locally when needed.
 
 ## What the checks cover
 
@@ -186,34 +185,24 @@ Push the submission commit to `vogsphere` and P3 GitOps changes to GitHub. These
 
 P3 `verify` accepts both v1 and v2. To prove an update specifically to v2, check the current image, Git revision and `/version.json`. A successful request inside a Pod does not prove the user's tunnel is open.
 
-Provisioning errors are not all handled the same way: the final diagnostic server `kubectl get nodes` in P1 allows failure, while `make test` runs after `vagrant up`. Use the test result and actual cluster state to judge whether the lab is ready.
-
 ## Nested virtualization
 
-This lab runs VirtualBox → Debian → KVM → guest VMs. Previous VBox.log output showed `VERR_VMX_INVALID_GUEST_STATE` followed by `GURU_MEDITATION`. This confirms a VMX error, but does not establish its trigger. RAM exhaustion has not been proven as the cause.
+P1 and P2 run KVM guests inside a Debian VM hosted by VirtualBox. This requires nested virtualization and access to libvirt from Debian.
 
-The current `scripts/prepare.sh` disables Intel EPT with `kvm_intel ept=0` and writes the setting to `/etc/modprobe.d/iot-kvm.conf`. If it is not set yet, the script requires all active libvirt VMs to stop before reloading the module. This affects the outer Debian VM as a whole. The scripts target the Intel lab described here.
+The shared `scripts/prepare.sh` configures Intel KVM with `ept=0` and saves the setting in `/etc/modprobe.d/iot-kvm.conf`. Changing this module option requires running libvirt guests to be stopped before the module is reloaded. This is specific to the lab environment and is not a general KVM requirement.
 
-This workaround has not been confirmed to prevent Guru Meditation. Sequential startup can be tried as a separate diagnostic step after the usual P1 `keys`, `prepare` and `check`:
-
-```bash
-vagrant up --provider=libvirt --no-parallel
-make test
-```
-
-Run these from `p1`. This experiment is not a proven fix for the underlying virtualization error. To check hardware acceleration on a running domain:
+If VM startup fails, first check the libvirt domains and KVM support:
 
 ```bash
-virsh -c qemu:///system qemu-monitor-command p1_osivkovS --hmp 'info kvm'
+virsh -c qemu:///system list --all
+lsmod | grep kvm
 ```
 
-Use `sudo` for this diagnostic command if elevated access is required. `kvm support: enabled` confirms that KVM is in use, but does not guarantee stable nested virtualization.
-
-Keep the memory layers separate when reading system metrics. Debian's `available` value describes guest headroom; freed guest memory may not return immediately to the physical host. Do not add VirtualBox thread rows in htop as if they were independent processes. Check both Debian and the physical host before changing the RAM allocation.
+For host-level VirtualBox failures, inspect the VirtualBox logs as well as the Debian guest logs.
 
 ## Troubleshooting
 
-Start with the component that reported the error. The commands below are for an existing environment; there is no need to create new infrastructure just to read these notes.
+Check the failing component first. These commands work on an existing environment.
 
 | Symptom | What to check |
 | --- | --- |
@@ -243,40 +232,23 @@ kubectl --context=k3d-iot -n dev get pods -o wide
 kubectl --context=k3d-iot -n dev get events --sort-by=.metadata.creationTimestamp
 ```
 
-The warning `[fog][WARNING] Unrecognized arguments: libvirt_ip_command` alone does not establish the cause of a failure. After a shutdown `Fog::Errors::TimeoutError`, inspect `virsh list --all` to find out which VMs are still running. If the outer VirtualBox VM itself crashed, read its VBox.log on the physical computer.
-
 ## Cleanup between evaluations
 
-Stopping and deleting serve different purposes. `halt` and `k3d cluster stop iot` preserve the environment. To rebuild P1/P2, run `make -C p1 destroy` and `make -C p2 destroy` from the clone that owns the VMs. For P3, remove the existing `iot` with `k3d cluster delete iot`.
+Stopping keeps the environment; deleting removes it. `halt` and `k3d cluster stop iot` preserve the environment. To rebuild P1/P2, run `make -C p1 destroy` and `make -C p2 destroy` from the clone that owns the VMs. For P3, remove the existing `iot` with `k3d cluster delete iot`.
 
-After deletion, inspect libvirt and Docker as well as local Vagrant status:
+Check for remaining resources before starting again:
 
 ```bash
 virsh -c qemu:///system list --all
-virsh -c qemu:///system pool-list --all
-virsh -c qemu:///system vol-list --pool default
 k3d cluster list
 docker ps -a
-docker volume ls
-docker network ls
 ```
 
-`default` is this lab's storage pool name. In another environment, use the name from `pool-list`. Vagrant box images remain as a cache for future VMs. Individual machine disks are normally named `p1_osivkovS.img`, `p1_osivkovSW.img` and `p2_osivkovS.img`.
-
-If a domain remains from an old clone, establish its origin and inspect its disk first:
-
-```bash
-virsh -c qemu:///system dumpxml p2_osivkovS
-virsh -c qemu:///system domblklist p2_osivkovS --details
-```
-
-Vagrant-libvirt normally records `Source: .../p2/Vagrantfile` in the XML. Check ownership before deleting a similarly named volume. Keep `.vagrant` until its VMs have been removed so Vagrant retains their identity. Shared networks `iotnet` and `vagrant-libvirt` can remain; `prepare.sh` prepares the project network on the next startup.
-
-Docker images can also remain to speed up the next run. If clearing the cache, inspect `docker image ls` and delete specific tags with `docker image rm`. A general `docker system prune --volumes` is unnecessary here. Existing P1 keys are preserved independently of VM deletion.
+Deleting the k3d cluster also deletes GitLab data stored inside it. Use the backup procedure below if that data needs to be kept.
 
 ## GitLab data
 
-The chart stores configuration, data and logs in three `local-path` PVCs. A normal K3d stop preserves them. The PVC templates include `helm.sh/resource-policy: keep`, so uninstalling the Helm release does not necessarily remove the PVCs. Deleting the cluster itself removes the data inside its nodes. See the [Helm documentation](https://helm.sh/docs/howto/charts_tips_and_tricks/) for the annotation's behavior.
+GitLab uses three `local-path` PVCs for configuration, data and logs. Stopping k3d keeps them. The PVC templates include `helm.sh/resource-policy: keep`, so uninstalling the Helm release does not necessarily remove the PVCs. Deleting the cluster itself removes the data inside its nodes. See the [Helm documentation](https://helm.sh/docs/howto/charts_tips_and_tricks/) for the annotation's behavior.
 
 To prepare a backup:
 
