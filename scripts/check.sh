@@ -40,7 +40,7 @@ fi
 
 # Verify the EPT setting required by our current workaround.
 if [[ "$(cat "$EPT_FILE")" != "N" ]]; then
-    echo "EPT is enabled. Run: make prepare PART=$PART"
+    echo "EPT is enabled. Run: cd $PART && make prepare"
     exit 1
 fi
 

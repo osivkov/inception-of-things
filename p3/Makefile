@@ -6,11 +6,6 @@ SHELL := /bin/bash
 CONTEXT ?= k3d-iot
 KUBECTL := kubectl --context=$(CONTEXT)
 
-APP_DIR := app/one-more-cup
-IMAGE ?= osivkov/one-more-cup
-VERSION ?= v1
-PLATFORM ?= linux/amd64
-
 install:
 	sudo bash scripts/install.sh
 
@@ -84,22 +79,6 @@ password:
 		-o jsonpath='{.data.password}' | base64 --decode
 	@echo
 
-# Build the application image from local source files.
-image-build:
-	test -f "$(APP_DIR)/releases/$(VERSION).json"
-	docker build --platform "$(PLATFORM)" \
-		--build-arg APP_VERSION="$(VERSION)" \
-		-t "$(IMAGE):$(VERSION)" "$(APP_DIR)"
-
-# Build and run the container smoke checks.
-image-test: image-build
-	cd "$(APP_DIR)" && \
-		sh scripts/smoke-container.sh "$(IMAGE):$(VERSION)" "$(VERSION)" 18088
-
-# Publish the image only after the smoke checks pass.
-image-push: image-test
-	docker push "$(IMAGE):$(VERSION)"
-
 help:
 	@echo "Run these commands from the p3 directory."
 	@echo ""
@@ -130,5 +109,4 @@ help:
 	@echo "Host-browser access also requires an SSH tunnel to Debian."
 
 .PHONY: help install install-helm up bonus-setup bonus-up stop \
-	status verify ui app password source-p3 source-bonus  image-build \
-	image-test image-push
+	status verify ui app password source-p3 source-bonus

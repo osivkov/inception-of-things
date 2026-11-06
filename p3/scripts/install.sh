@@ -8,7 +8,7 @@ fi
 
 
 apt-get update
-apt-get install -y docker.io curl ca-certificates
+apt-get install -y docker.io curl ca-certificates python3
 
 systemctl enable --now docker
 
