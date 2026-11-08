@@ -153,7 +153,7 @@ cd ~/inception-of-things/p1
 make up
 ```
 
-This generates missing SSH keys, prepares the network, checks the environment, starts both VMs and runs the verification script. The server uses `192.168.56.110`; the worker uses `192.168.56.111`.
+This generates missing SSH keys, prepares the network, checks the environment, starts both VMs, reruns provisioning for both guests and runs the verification script. The server uses `192.168.56.110`; the worker uses `192.168.56.111`. Re-running `make up` after a transient provisioning failure is supported; if a VM or the outer VirtualBox guest crashed, run `make status` first and then repeat `make up`.
 
 After startup, inspect the lab:
 

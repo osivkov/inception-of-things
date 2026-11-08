@@ -133,9 +133,9 @@ The second request requires GitLab to be running. Application access on 8888 doe
 
 ### P1
 
-`make up` calls `keys`, then `prepare`, `check`, `vagrant up --provider=libvirt` and `test`. The Makefile uses Vagrant's default startup behavior.
+`make up` calls `keys`, then `prepare`, `check`, `vagrant up --provider=libvirt --provision` and `test`. The explicit `--provision` is intentional: it lets a second run repair a guest after a transient failure during installation instead of silently skipping provisioners on an already-created VM.
 
-On both VMs, `common.sh` installs tools and SSH keys, adds hostnames to `/etc/hosts` and disables swap. `server.sh` installs K3s in server mode. `worker.sh` fetches `/var/lib/rancher/k3s/server/node-token` from the server over SSH and installs the agent with the API address and token. If the token cannot be read, worker provisioning fails.
+On both VMs, `common.sh` installs tools and SSH keys, adds hostnames to `/etc/hosts` and disables swap. `server.sh` installs K3s in server mode when needed, retries the installer download, enables the service and waits for the API. `worker.sh` fetches `/var/lib/rancher/k3s/server/node-token` from the server over SSH, retries the installer download, enables the agent and waits for it to be active. If either service cannot become ready, provisioning prints its systemd status and recent journal before failing.
 
 K3s inside the guests uses its own container runtime. P1/P2 do not require Docker on each node; Docker in the outer Debian VM is used by K3d for P3.
 

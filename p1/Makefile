@@ -60,7 +60,7 @@ check:
 up: keys
 	$(MAKE) prepare
 	$(MAKE) check
-	vagrant up --provider=libvirt
+	vagrant up --provider=libvirt --provision
 	$(MAKE) test
 
 test:
