@@ -1,4 +1,4 @@
-
+LIBVIRT := virsh -c qemu:///system
 .DEFAULT_GOAL := help
 
 SERVER := osivkovS
@@ -12,7 +12,7 @@ endef
         cluster nodes node-info pods system-pods \
         deployments services ingress events \
         k3s-status logs-server logs-worker \
-        watch cluster-check
+        watch cluster-check network
 
 help:
 	@echo '=== P1: Infrastructure ==='
@@ -50,6 +50,13 @@ keys:
 		ssh-keygen -q -t ed25519 -N '' -f confs/cluster_key; \
 	fi
 	@ssh-keygen -y -f confs/cluster_key > confs/cluster_key.pub
+
+network:
+	@$(LIBVIRT) net-info iotnet >/dev/null 2>&1 || \
+		$(LIBVIRT) net-define confs/iotnet.xml
+	@$(LIBVIRT) net-autostart iotnet
+	@$(LIBVIRT) net-info iotnet | grep -q 'Active: *yes' || \
+		$(LIBVIRT) net-start iotnet
 
 prepare:
 	bash ../scripts/prepare.sh p1
