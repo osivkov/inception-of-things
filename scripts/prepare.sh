@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -37,6 +38,12 @@ fi
 EPT_FILE="/sys/module/kvm_intel/parameters/ept"
 EPT_CONFIG="/etc/modprobe.d/iot-kvm.conf"
 
+# Preserve the EPT setting before reloading the KVM module.
+if ! grep -Fxq 'options kvm_intel ept=0' "$EPT_CONFIG" 2>/dev/null; then
+    printf '%s\n' 'options kvm_intel ept=0' |
+        sudo tee "$EPT_CONFIG" >/dev/null
+fi
+
 # Disable EPT only when needed.
 # This is a workaround for our nested VirtualBox/KVM environment.
 if [[ ! -r "$EPT_FILE" ]] || [[ "$(cat "$EPT_FILE")" != "N" ]]; then
@@ -53,12 +60,6 @@ if [[ ! -r "$EPT_FILE" ]] || [[ "$(cat "$EPT_FILE")" != "N" ]]; then
     fi
 
     sudo modprobe kvm_intel ept=0
-fi
-
-# Preserve the EPT setting for subsequent module loads.
-if ! grep -Fxq 'options kvm_intel ept=0' "$EPT_CONFIG" 2>/dev/null; then
-    printf '%s\n' 'options kvm_intel ept=0' |
-        sudo tee "$EPT_CONFIG"
 fi
 
 # Define the network only if it does not exist.
