@@ -110,11 +110,11 @@ The configured resources are:
 | --- | --- | --- | --- |
 | P1 server node `osivkovS` | 1 vCPU | 1024 MiB | Virtual disk from the Vagrant box |
 | P1 worker node `osivkovSW` | 1 vCPU | 1024 MiB | A separate disk from the same box |
-| P2 server node `osivkovS` | 1 vCPU | 1024 MiB | Virtual disk from the Vagrant box |
+| P2 server node `osivkovS` | 2 vCPU | 2024 MiB | Virtual disk from the Vagrant box |
 | P3 `iot` | No explicit limit | No explicit limit | K3s data in Docker; 1 server, 0 agents |
 | Bonus GitLab | request: 1 CPU; limit: 4 CPU | request: 2 GiB; limit: 4 GiB | PVCs: 1 GiB config, 10 GiB data, 2 GiB logs |
 
-The nested guests are kept at the minimum recommended by the subject (1 CPU, 1024 MiB). The outer Debian VM needs more: in our runs it had 8 vCPU and about 7 GiB of RAM, which is comfortable for P1 (two guests) and for P3 with GitLab. P3 shares Debian's available resources with Docker, k3d, Argo CD and the application. The bonus adds GitLab; its PVC sizes are capacity requests, not actual disk usage.
+Each P1 guest is configured with 1 vCPU and 1024 MiB of RAM. The P2 guest is configured with 2 vCPU and 2024 MiB of RAM. The outer Debian VM needs more: in our runs it had 8 vCPU and about 7 GiB of RAM, which is comfortable for P1 (two guests) and for P3 with GitLab. P3 shares Debian's available resources with Docker, k3d, Argo CD and the application. The bonus adds GitLab; its PVC sizes are capacity requests, not actual disk usage.
 
 Disk sizes of the P1/P2 guests are not set explicitly in the Vagrantfiles; they depend on the box. Check available memory and disk space before downloading images or starting GitLab:
 
@@ -278,7 +278,22 @@ Then open the same addresses in the Codam browser. Keep both `make app` and `mak
 
 #### Demonstrate an update from v1 to v2
 
-In `p3/confs/application/deployment.yaml`, change the image from `osivkov/one-more-cup:v1` to `osivkov/one-more-cup:v2`. From the repository root, push the change to GitHub:
+The current P3 manifest uses `osivkov/one-more-cup:v2`; the bonus seed manifest uses `v1`. To demonstrate the P3 update, first select GitHub with `make source-p3` from `p3`. In `p3/confs/application/deployment.yaml`, change the image to `osivkov/one-more-cup:v1`, then commit and push the baseline from the repository root:
+
+```bash
+cd ~/inception-of-things
+git add p3/confs/application/deployment.yaml
+git commit -m "Set application to v1 for the update demonstration"
+git push origin main
+```
+
+Wait for Argo CD to deploy that commit. Run `make verify` and `make status` from `p3`, and confirm that the revision matches the baseline commit, the image is `osivkov/one-more-cup:v1`, and `/version.json` returns `"version":"v1"`. Keep `make app` running in another Debian terminal for the HTTP check:
+
+```bash
+curl -fsS http://127.0.0.1:8888/version.json
+```
+
+Then change the image back to `osivkov/one-more-cup:v2` and push the update:
 
 ```bash
 cd ~/inception-of-things
@@ -287,7 +302,7 @@ git commit -m "Switch application to v2"
 git push origin main
 ```
 
-Here, `origin` must point to the GitHub repository configured in the Argo CD Application. Check it with `git remote -v`. Pushing only to Vogsphere will not update the application, because Argo CD reads GitHub.
+For both pushes, `origin` must point to the GitHub repository configured in the Argo CD Application, and the commit must reach its watched branch, `main`. Check the remote with `git remote -v`. If you are working on another branch, merge the change into `main` before checking the rollout. Pushing only to Vogsphere will not update the application, because Argo CD reads GitHub.
 
 Wait for synchronization, then check the revision, image and HTTP response:
 
@@ -298,7 +313,7 @@ make status
 curl -fsS http://127.0.0.1:8888/version.json
 ```
 
-Keep `make app` running for the `curl` request. The response should contain `"version":"v2"`, allowing for JSON whitespace. A local edit without a push will not reach Argo CD. Switch back to `v1` with another commit to demonstrate the reverse update.
+Keep `make app` running for the `curl` request. Confirm that the revision matches the update commit, the image is `osivkov/one-more-cup:v2`, and the response contains `"version":"v2"`, allowing for JSON whitespace. A local edit without a push will not reach Argo CD. Switch back to `v1` with another commit to demonstrate the reverse update.
 
 The application is pulled from Docker Hub. Its build sources are not in the current repository tree, so startup depends on the published tags `osivkov/one-more-cup:v1` and `v2`.
 

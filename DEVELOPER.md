@@ -95,7 +95,7 @@ The Vagrantfiles set VM resources. Kubernetes requests and limits control contai
 | Configuration file | Current allocation |
 | --- | --- |
 | `p1/Vagrantfile` | Both machines: 1 vCPU / 1024 MiB (set per machine in the `MACHINES` list) |
-| `p2/Vagrantfile` | 1 vCPU / 1024 MiB for the server |
+| `p2/Vagrantfile` | 2 vCPU / 2024 MiB for the server |
 | `p3/confs/cluster.yaml` | 1 server, 0 agents; no explicit CPU or RAM limits |
 | `bonus/charts/gitlab/templates/deployment.yaml` | requests: 1 CPU / 2 GiB; limits: 4 CPU / 4 GiB; `/dev/shm`: memory-backed emptyDir up to 256 MiB |
 | `bonus/charts/gitlab/templates/storage.yaml` | PVCs: config 1 GiB, data 10 GiB, logs 2 GiB; StorageClass `local-path` |
@@ -119,7 +119,8 @@ The versions below are configured in the project files or were used in our runs.
 | GitLab CE | `19.5.1-ce.0` | `bonus/charts/gitlab/values.yaml` |
 | P2 app1 | `nginx:1.28-alpine` | `p2/confs/app1.yaml` |
 | P2 app2/app3 | `hashicorp/http-echo:1.0.0` | `p2/confs/app2.yaml`, `app3.yaml` |
-| One More Cup | `osivkov/one-more-cup:v1`, with `v2` for the update demonstration | P3 Deployment and bonus seed Deployment |
+| One More Cup (P3) | `osivkov/one-more-cup:v2`; prepare a `v1` baseline before demonstrating the update | `p3/confs/application/deployment.yaml` |
+| One More Cup (bonus seed) | `osivkov/one-more-cup:v1`; used only to initialize an empty GitLab repository | `bonus/confs/application/deployment.yaml` |
 
 P3 uses Docker from Debian packages; K3s in P1/P2 uses its own container runtime. P2 and P3 run slightly different K3s minor versions (v1.37 and v1.36); they are independent environments, so this does not affect behavior, but keep it in mind when upgrading.
 
