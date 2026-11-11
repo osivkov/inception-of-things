@@ -4,14 +4,14 @@
 
 ## Description
 
-This repository contains our Inception-of-Things project. P1 builds a Kubernetes cluster from two Vagrant VMs: a **server node (control plane)** and a **worker node (K3s agent)**. P2 uses a single server node to run three applications behind an Ingress. P3 moves to a local k3d cluster with Argo CD, and the bonus adds GitLab to that cluster.
+This repository contains our Inception-of-Things project. P1 builds a Kubernetes cluster from two Vagrant VMs running on VirtualBox: a **server node (control plane)** and a **worker node (K3s agent)**. P2 uses a single server node to run three applications behind an Ingress. P3 moves to a local k3d cluster with Argo CD, and the bonus adds GitLab to that cluster.
 
 Inception-of-Things is a system administration project from the **42 advanced curriculum**. Its goal is to understand Kubernetes through a working lab: provision machines, connect server and agent nodes, route HTTP requests to applications, and deploy versioned workloads from Git.
 
 | Part | What runs | Working directory | Start command |
 | --- | --- | --- | --- |
-| P1 | A server node and a worker node in two Vagrant VMs | `p1/` | `make up` |
-| P2 | One server node, three applications and Traefik Ingress | `p2/` | `make up` |
+| P1 | A server node and a worker node in two Vagrant VMs (VirtualBox) | `p1/` | `make up` |
+| P2 | One server node, three applications and Traefik Ingress (VirtualBox) | `p2/` | `make up` |
 | P3 | K3d, Argo CD and One More Cup deployed from GitHub | `p3/` | `make up` |
 | Bonus | Local GitLab in the P3 cluster | `p3/` | `make bonus-setup`, then `make bonus-up` after token setup |
 
@@ -28,13 +28,12 @@ P1, P2 and P3 each have their own `Makefile`, which provides shortcuts for start
 
 | Directory | Purpose |
 | --- | --- |
-| `p1/` | Two Vagrant VMs: a K3s server node and a worker node |
+| `p1/` | Two Vagrant VMs (VirtualBox): a K3s server node and a worker node |
 | `p2/` | One K3s server node with three applications and Ingress |
 | `p3/` | k3d cluster, Argo CD and application manifests |
 | `bonus/` | GitLab Helm chart and bootstrap scripts |
-| `scripts/` | Shared libvirt preparation and checks for P1/P2 |
 
-**There is no Makefile at the repository root.** Run `make` inside `p1`, `p2` or `p3`. Each provides `make help` to list its commands. The examples below assume the repository is at `~/inception-of-things`; adjust the `cd` paths if your clone is elsewhere.
+**There is no Makefile at the repository root.** Run `make` inside `p1`, `p2` or `p3`. Each provides `make help` (P1 prints its command list with a bare `make`) to list its commands. The examples below assume the repository is at `~/inception-of-things`; adjust the `cd` paths if your clone is elsewhere.
 
 ## Implementation strategy and algorithm choices
 
@@ -42,9 +41,13 @@ The project is built around provisioning order, HTTP routing and Git reconciliat
 
 ### Machine provisioning and cluster bootstrap
 
-P1 uses two Debian guests to keep the server node and worker node separate. The server runs the Kubernetes control plane and datastore, while the worker runs the K3s agent and executes workloads assigned to it. The K3s server can also execute workloads. P2 uses one server node because its focus is application routing. Both parts use libvirt and the shared `iotnet` definition, so their guest addresses and networking can be inspected directly during evaluation.
+P1 uses two Debian 13 guests (`bento/debian-13` box) to keep the server node and worker node separate. The server runs the Kubernetes control plane and datastore, while the worker runs the K3s agent and executes workloads assigned to it. The K3s server can also execute workloads. P2 uses one server node because its focus is application routing. Both parts use the VirtualBox provider and a host-only private network (`192.168.56.0/24`), so guest addresses can be inspected directly from the outer Debian VM during evaluation.
 
-The startup targets prepare local prerequisites before provisioning and run verification afterward. P1 preserves an existing cluster key, installs the server, and lets the worker retrieve its join token over SSH. Token retrieval has a bounded retry loop: the worker joins only after it obtains a token, and provisioning fails if the token remains unavailable. P2 waits for its API and node before applying application manifests and waiting for Deployment rollouts. These readiness checks handle services that become available after their installation command returns.
+Each guest has two network interfaces: a NAT adapter managed by Vagrant for SSH and internet access, and a host-only adapter with the fixed project address. The provisioning scripts find the project interface by its IP address instead of assuming a name such as `eth1`, then pass it to K3s as `--flannel-iface`, together with `--node-ip` and `--advertise-address`. Without this, nodes can end up talking over the NAT address `10.0.2.15` and the worker cannot join properly.
+
+P1 passes the join token through the Vagrant shared folder: the server waits until its node is `Ready`, then copies the K3s node token to `p1/confs/node-token`, which the worker sees as `/vagrant/confs/node-token`. The worker joins only after it obtains a token, and provisioning fails if the token remains unavailable. The token is regenerated on every run and is excluded from Git. P2 waits for its API and node before applying application manifests and waiting for Deployment rollouts. These readiness checks handle services that become available after their installation command returns, which matters on nested virtualization where first starts are slow.
+
+SSH access uses Vagrant's generated per-machine key; no password logins and no shared key pair are involved.
 
 ### HTTP routing and replicas
 
@@ -70,6 +73,7 @@ The lab uses a few simple visual elements to make its behavior easy to inspect:
 | Distinct app2/app3 responses | Each response names its application, making Host routing and the default route easy to compare in a terminal or browser. |
 | Argo CD web UI | Sync and health indicators, the Git revision and the resource view show whether a commit reached the cluster and which resources belong to the application. |
 | Application version endpoint | `/version.json` identifies the deployed One More Cup release alongside the browser view, so the update demonstration has an explicit version check. |
+| P1 `make eval` | One command prints VM resources, hostnames, IPs, passwordless SSH, K3s server/agent services and the node list, in the order an evaluator usually asks for them. |
 | Architecture tree and command tables | The architecture tree separates the physical host, outer VM and inner environments. Command tables keep startup, stopping and deletion easy to distinguish. |
 
 The access instructions below include port-forwards and SSH tunnels so these interfaces can be used from the Codam browser even when the services listen only inside Debian.
@@ -85,16 +89,16 @@ The project runs inside a Debian VM on a Codam machine:
 ```text
 Codam computer — Ubuntu 22.04, VirtualBox
 └── Debian 13 — the outer VM, where this repository lives
-    ├── P1 — two Vagrant VMs using libvirt / QEMU / KVM
+    ├── P1 — two Vagrant VMs using VirtualBox (nested)
     │   ├── osivkovS  — server node, 192.168.56.110
     │   └── osivkovSW — worker node, 192.168.56.111
-    ├── P2 — one Vagrant server node, 192.168.56.110
+    ├── P2 — one Vagrant server node using VirtualBox, 192.168.56.110
     └── P3 and bonus — a K3d cluster in Docker
 ```
 
-**Run the commands below inside Debian** unless stated otherwise. The Codam computer is used for the editor, terminal and browser. Package installation and libvirt run inside Debian, where `sudo` is available.
+**Run the commands below inside Debian** unless stated otherwise. The Codam computer is used for the editor, terminal and browser. Package installation and VirtualBox run inside Debian, where `sudo` is available.
 
-P1 and P2 share the server address `192.168.56.110`, so they must run separately. P3 and bonus share the `iot` cluster and the Argo CD Application `playground`; switching between them changes the source of the application manifests.
+P1 and P2 share the server address `192.168.56.110` **and the VM name `osivkovS`**, so they must not exist at the same time: destroy P1 (`make clean` in `p1`) before starting P2, and vice versa. Halting is not enough, because a halted VM still owns its name in VirtualBox. P3 and bonus share the `iot` cluster and the Argo CD Application `playground`; switching between them changes the source of the application manifests.
 
 ### Hardware and resource allocation
 
@@ -104,38 +108,37 @@ The configured resources are:
 
 | Component | CPU | RAM | Disk / persistent data |
 | --- | --- | --- | --- |
-| P1 server node `osivkovS` | 2 vCPU | 2048 MiB | Virtual disk from the Vagrant box |
+| P1 server node `osivkovS` | 1 vCPU | 1024 MiB | Virtual disk from the Vagrant box |
 | P1 worker node `osivkovSW` | 1 vCPU | 1024 MiB | A separate disk from the same box |
-| P2 server node `osivkovS` | 3 vCPU | 3072 MiB | Virtual disk from the Vagrant box |
+| P2 server node `osivkovS` | 2 vCPU | 2024 MiB | Virtual disk from the Vagrant box |
 | P3 `iot` | No explicit limit | No explicit limit | K3s data in Docker; 1 server, 0 agents |
 | Bonus GitLab | request: 1 CPU; limit: 4 CPU | request: 2 GiB; limit: 4 GiB | PVCs: 1 GiB config, 10 GiB data, 2 GiB logs |
 
-P1 and P2 each allocate 3 GiB to their guest VMs. Debian needs additional memory for itself and virtualization. P3 shares Debian's available resources with Docker, k3d, Argo CD and the application. The bonus adds GitLab; its PVC sizes are capacity requests, not actual disk usage.
+Each P1 guest is configured with 1 vCPU and 1024 MiB of RAM. The P2 guest is configured with 2 vCPU and 2024 MiB of RAM. The outer Debian VM needs more: in our runs it had 8 vCPU and about 7 GiB of RAM, which is comfortable for P1 (two guests) and for P3 with GitLab. P3 shares Debian's available resources with Docker, k3d, Argo CD and the application. The bonus adds GitLab; its PVC sizes are capacity requests, not actual disk usage.
 
-P1/P2 disk sizes are not set explicitly in the Vagrantfiles; they depend on the box. Check available memory and disk space before downloading images or starting GitLab:
+Disk sizes of the P1/P2 guests are not set explicitly in the Vagrantfiles; they depend on the box. Check available memory and disk space before downloading images or starting GitLab:
 
 ```bash
 free -h
 df -h /
 ```
 
-Stop P1 before running P2: both parts use the same private IP for their server.
-
 ### Before the first run
 
-P1/P2 require Vagrant, the `vagrant-libvirt` plugin, QEMU/KVM, libvirt, `virsh`, `make` and the OpenSSH client. They also need access to `qemu:///system` and nested virtualization. This repository does not include an installer for these dependencies.
+P1/P2 require VirtualBox 7.2, Vagrant 2.4.x, `make`, `curl` and the OpenSSH client inside Debian. VirtualBox is not in the Debian 13 repositories; install it from Oracle's APT repository (see [DEVELOPER.md](DEVELOPER.md#installing-virtualbox-and-vagrant)). The user must belong to the `vboxusers` group, and the outer VM must expose hardware virtualization (VT-x/AMD-V) to Debian. This repository does not include an installer for these dependencies.
 
 ```bash
 vagrant --version
-vagrant plugin list
-virsh -c qemu:///system list --all
+VBoxManage --version
+grep -Ec '(vmx|svm)' /proc/cpuinfo      # must be greater than 0
+lsmod | grep -E 'kvm|vboxdrv'
 ```
+
+`vboxdrv` must be loaded and **no `kvm` modules may be loaded**. If KVM (for example through libvirt) holds VT-x, VirtualBox fails with `VERR_VMX_IN_VMX_ROOT_MODE`. Free it with `make kvm-off` from `p1` or `p2`; see the [nested virtualization notes](DEVELOPER.md#nested-virtualization) for details.
 
 P3 installs Docker, Python 3, k3d and kubectl with `make install` from `p3`. The bonus also needs Helm, installed with `make install-helm` from the same directory. The first run needs internet access to download packages, the Vagrant box and container images.
 
-> P1/P2 `prepare.sh` changes Intel KVM EPT across the outer Debian VM and persists the setting in `/etc/modprobe.d/iot-kvm.conf`. All active libvirt VMs must be stopped before the KVM module can be reloaded. See the [nested virtualization notes](DEVELOPER.md#nested-virtualization) for details and limitations.
-
-In P1, the Makefile creates a missing local SSH key pair so the worker node can retrieve its K3s join token from the server node. Existing keys are preserved. Vagrant manages SSH access from Debian to both VMs. P2 has only one server node and does not need a separate cluster key pair.
+In P1, the server node writes the K3s join token into the shared folder (`p1/confs/node-token`) and the worker node reads it from there. The file is regenerated on every run and is ignored by Git. Vagrant manages SSH access from Debian to the VMs with its own generated keys. P2 has only one server node and needs no token.
 
 ### P1 — server node and worker node
 
@@ -153,7 +156,7 @@ cd ~/inception-of-things/p1
 make up
 ```
 
-This generates missing SSH keys, prepares the network, checks the environment, starts both VMs and runs the verification script. The server uses `192.168.56.110`; the worker uses `192.168.56.111`.
+This starts the server VM and then the worker VM, installing K3s on each. The first start downloads the box and K3s and can take several minutes on nested virtualization.
 
 After startup, inspect the lab:
 
@@ -161,31 +164,33 @@ After startup, inspect the lab:
 cd ~/inception-of-things/p1
 make status
 make nodes
-make system-pods
+make eval
 ```
 
-Expect both VMs to be `running`, both Kubernetes nodes to be `Ready`, and the system Pods to be healthy. `Completed` is normal for finished installation Jobs. Run `make test` from `p1` to check SSH, guest names and IPs, K3s services and two Ready nodes; inspect all system Pods separately. The worker may have `<none>` in the Kubernetes `ROLES` column because it has no role label; its agent mode is verified through the `k3s-agent` service.
+Expect both VMs to be `running` and both Kubernetes nodes to be `Ready`. `make nodes` prints `kubectl get nodes -o wide` and the system Pods. `make eval` runs every evaluation check in sequence: VM resources and names, OS, passwordless SSH, the `192.168.56.110/111` addresses and ping between the nodes, the `k3s` / `k3s-agent` services and the node list. Individual steps are available as `check-vms`, `check-host`, `check-net`, `check-ssh` and `check-k3s`. The worker may have `<none>` in the Kubernetes `ROLES` column because it has no role label; its agent mode is verified through the `k3s-agent` service.
 
-To access a VM, use `vagrant ssh osivkovS` or `vagrant ssh osivkovSW` from `p1`. Check each node's service, then query the cluster through the server node:
+To access a VM, use `make ssh-s` or `make ssh-sw` (the same as `vagrant ssh osivkovS` / `vagrant ssh osivkovSW`). Check each node's service, then query the cluster through the server node:
 
 ```bash
 cd ~/inception-of-things/p1
 vagrant ssh osivkovS -c 'sudo systemctl is-active k3s'
 vagrant ssh osivkovSW -c 'sudo systemctl is-active k3s-agent'
-vagrant ssh osivkovS -c 'sudo k3s kubectl get nodes -o wide'
+vagrant ssh osivkovS -c 'kubectl get nodes -o wide'
 ```
 
 > On the worker, plain `kubectl` may connect to `localhost:8080` and return `connection refused`. Without an administrative kubeconfig, that is expected. Check the agent through `k3s-agent` and the server's node list.
 
-Both service checks should return `active`, and the node list should show two Ready nodes with the addresses in the table. From `p1`, stop with `make halt` and start again with `make up`. After editing provisioning scripts, run `vagrant provision`, then `make test` in that directory. A regular `up` may skip provisioners on an existing VM.
+Both service checks should return `active`, and the node list should show two Ready nodes with the addresses in the table. From `p1`, stop with `make down` and start again with `make up`. Rebuild from scratch with `make re`, and delete everything with `make clean`. After editing provisioning scripts, run `vagrant provision`, then `make eval` in that directory. A regular `up` may skip provisioners on an existing VM.
+
+If the first start stalls (for example, Vagrant waits on SSH), see the [troubleshooting table](DEVELOPER.md#troubleshooting); in most cases waiting a few minutes and running `make up` again resumes where it stopped.
 
 ### P2 — three applications and Ingress
 
-Stop P1 before starting P2:
+Destroy P1 before starting P2 (same VM name and IP):
 
 ```bash
 cd ~/inception-of-things/p1
-make halt
+make clean
 cd ../p2
 make up
 ```
@@ -205,9 +210,9 @@ make ingress-details
 make http-test
 ```
 
-Run `make test` from `p2` to check the VM, K3s service and node, application rollouts, three ready app2 replicas and all three HTTP routes. During evaluation, `replicas` and `ingress-details` show the configuration behind those HTTP responses.
+Run `make test` from `p2` to check the VM, K3s service and node, application rollouts, three ready app2 replicas and all three HTTP routes. During evaluation, `replicas` and `ingress-details` show the configuration behind those HTTP responses. Traefik is installed by K3s after the API is up, so right after boot the first requests may be refused for a short time; the test retries automatically.
 
-You can test the Ingress routes without DNS by setting the `Host` header:
+You can test the Ingress routes without DNS by setting the `Host` header. The private network is reachable from Debian directly:
 
 ```bash
 curl -H 'Host: app1.com' http://192.168.56.110/
@@ -223,7 +228,7 @@ ssh -L 18080:192.168.56.110:80 osivkov@DEBIAN_VM_ADDRESS
 
 In another Codam terminal, run `curl -H 'Host: app2.com' http://127.0.0.1:18080/`. Opening `http://127.0.0.1:18080/` in a browser without changing the Host header shows app3, the default route.
 
-Stop with `make halt` from `p2`. After editing manifests, run `vagrant provision osivkovS` there and repeat `make test`.
+Stop with `make halt` from `p2`, recreate with `make re`, and delete with `make destroy` (or `make clean`, which also removes `.vagrant/`). After editing manifests, run `vagrant provision osivkovS` there and repeat `make test`.
 
 ### P3 — GitHub and Argo CD
 
@@ -273,7 +278,22 @@ Then open the same addresses in the Codam browser. Keep both `make app` and `mak
 
 #### Demonstrate an update from v1 to v2
 
-In `p3/confs/application/deployment.yaml`, change the image from `osivkov/one-more-cup:v1` to `osivkov/one-more-cup:v2`. From the repository root, push the change to GitHub:
+The current P3 manifest uses `osivkov/one-more-cup:v2`; the bonus seed manifest uses `v1`. To demonstrate the P3 update, first select GitHub with `make source-p3` from `p3`. In `p3/confs/application/deployment.yaml`, change the image to `osivkov/one-more-cup:v1`, then commit and push the baseline from the repository root:
+
+```bash
+cd ~/inception-of-things
+git add p3/confs/application/deployment.yaml
+git commit -m "Set application to v1 for the update demonstration"
+git push origin main
+```
+
+Wait for Argo CD to deploy that commit. Run `make verify` and `make status` from `p3`, and confirm that the revision matches the baseline commit, the image is `osivkov/one-more-cup:v1`, and `/version.json` returns `"version":"v1"`. Keep `make app` running in another Debian terminal for the HTTP check:
+
+```bash
+curl -fsS http://127.0.0.1:8888/version.json
+```
+
+Then change the image back to `osivkov/one-more-cup:v2` and push the update:
 
 ```bash
 cd ~/inception-of-things
@@ -282,7 +302,7 @@ git commit -m "Switch application to v2"
 git push origin main
 ```
 
-Here, `origin` must point to the GitHub repository configured in the Argo CD Application. Check it with `git remote -v`. Pushing only to Vogsphere will not update the application, because Argo CD reads GitHub.
+For both pushes, `origin` must point to the GitHub repository configured in the Argo CD Application, and the commit must reach its watched branch, `main`. Check the remote with `git remote -v`. If you are working on another branch, merge the change into `main` before checking the rollout. Pushing only to Vogsphere will not update the application, because Argo CD reads GitHub.
 
 Wait for synchronization, then check the revision, image and HTTP response:
 
@@ -293,7 +313,7 @@ make status
 curl -fsS http://127.0.0.1:8888/version.json
 ```
 
-Keep `make app` running for the `curl` request. The response should contain `"version":"v2"`, allowing for JSON whitespace. A local edit without a push will not reach Argo CD. Switch back to `v1` with another commit to demonstrate the reverse update.
+Keep `make app` running for the `curl` request. Confirm that the revision matches the update commit, the image is `osivkov/one-more-cup:v2`, and the response contains `"version":"v2"`, allowing for JSON whitespace. A local edit without a push will not reach Argo CD. Switch back to `v1` with another commit to demonstrate the reverse update.
 
 The application is pulled from Docker Hub. Its build sources are not in the current repository tree, so startup depends on the published tags `osivkov/one-more-cup:v1` and `v2`.
 
@@ -354,13 +374,15 @@ Run these commands inside the directory named in the column header:
 | Action | P1: `p1/` | P2: `p2/` | P3 and bonus: `p3/` |
 | --- | --- | --- | --- |
 | Inspect status | `make status` | `make status` | `make status` |
-| Stop and preserve data | `make halt` | `make halt` | `make stop` |
-| Delete the environment | `make destroy` | `make destroy` | `k3d cluster delete iot` |
+| Stop and preserve data | `make down` | `make halt` | `make stop` |
+| Recreate from scratch | `make re` | `make re` | `k3d cluster delete iot`, then `make up` |
+| Delete the environment | `make clean` | `make destroy` or `make clean` | `k3d cluster delete iot` |
 
-Delete VMs from the clone that created them. After `destroy` or `delete`, check the actual resources:
+Delete VMs from the clone that created them. After `clean`, `destroy` or `delete`, check the actual resources:
 
 ```bash
-virsh -c qemu:///system list --all
+VBoxManage list vms
+vagrant global-status --prune
 k3d cluster list
 docker ps -a
 docker volume ls
@@ -370,7 +392,7 @@ For cleanup and recovery commands, see [DEVELOPER.md](DEVELOPER.md#cleanup-betwe
 
 Deleting `iot` removes local GitLab data. The PVC retention annotation used for Helm uninstall does not protect against deletion of the cluster itself. Downloaded Vagrant boxes and Docker images can remain cached after deleting the environments.
 
-To start the next part, enter its directory (`p1`, `p2` or `p3`) and run `make up`. P1/P2 prepare `iotnet` automatically.
+To start the next part, enter its directory (`p1`, `p2` or `p3`) and run `make up`. Remember to destroy P1 before P2 and the reverse.
 
 
 ## Resources
@@ -379,7 +401,8 @@ Useful references:
 
 | Topic | Reference |
 | --- | --- |
-| VM lifecycle and provisioning | [Vagrant](https://developer.hashicorp.com/vagrant/docs), [vagrant-libvirt](https://vagrant-libvirt.github.io/vagrant-libvirt/) |
+| VM lifecycle and provisioning | [Vagrant](https://developer.hashicorp.com/vagrant/docs), [Vagrant VirtualBox provider](https://developer.hashicorp.com/vagrant/docs/providers/virtualbox) |
+| VirtualBox on Linux, host-only networking | [VirtualBox Linux downloads](https://www.virtualbox.org/wiki/Linux_Downloads), [VirtualBox manual](https://www.virtualbox.org/manual/) |
 | Server and agent roles, K3s components | [K3s architecture](https://docs.k3s.io/architecture), [requirements](https://docs.k3s.io/installation/requirements) |
 | Running K3s in Docker | [k3d configuration files](https://k3d.io/stable/usage/configfile/) |
 | Routing HTTP requests to an application | [Kubernetes Ingress](https://kubernetes.io/docs/concepts/services-networking/ingress/) |
@@ -389,8 +412,9 @@ Useful references:
 
 ### Use of AI
 
-AI assistance through Codex was used for the following tasks during project preparation:
+AI assistants (Codex and Claude) were used for the following tasks during project preparation:
 
 - Drafting, editing and translating `README.md` and `DEVELOPER.md`, including resource tables, user notes and evaluation instructions.
 - Reviewing existing Vagrantfiles, Makefiles, shell scripts, Kubernetes manifests and the GitLab Helm chart against the documentation, and helping interpret SSH, networking and nested virtualization diagnostics.
+- Helping migrate P1 and P2 from libvirt to VirtualBox, including the Vagrantfiles, provisioning scripts and the evaluation targets in the Makefiles.
 - Assisting with local Vagrant and Docker cleanup before evaluation, validating Vagrant configuration, and checking documentation links and command examples.
