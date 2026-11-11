@@ -1,40 +1,27 @@
+# -*- mode: ruby -*-
+BOX = "bento/debian-13"   # проверьте, что box существует, см. ниже
+
+MACHINES = [
+  { name: "osivkovS",  ip: "192.168.56.110", script: "scripts/server.sh", memory: 1024 },
+  { name: "osivkovSW", ip: "192.168.56.111", script: "scripts/agent.sh",  memory: 1024 },
+]
+
 Vagrant.configure("2") do |config|
-  config.vm.box = "debian/trixie64"
-  config.vm.boot_timeout = 600
-  config.vm.synced_folder ".", "/vagrant", disabled: true
+  config.vm.box = BOX
+  config.vm.synced_folder ".", "/vagrant", type: "virtualbox"
 
-  config.vm.provider :libvirt do |lv|
-    lv.cpus = 1
-    lv.memory = 1024
-  end
+  MACHINES.each do |m|
+    config.vm.define m[:name] do |node|
+      node.vm.hostname = m[:name]
+      node.vm.network "private_network", ip: m[:ip]
 
-  config.vm.define "osivkovS" do |s|
-    s.vm.hostname = "osivkovS"
-    s.vm.provider :libvirt do |lv|
-      lv.cpus = 2
-      lv.memory = 2048
+      node.vm.provider "virtualbox" do |vb|
+        vb.name   = m[:name]
+        vb.cpus   = 1
+        vb.memory = m[:memory]
+      end
+
+      node.vm.provision "shell", path: m[:script], env: { "NODE_IP" => m[:ip] }
     end
-    s.vm.network "private_network",
-      ip: "192.168.56.110",
-      libvirt__network_name: "iotnet"
-
-    s.vm.provision "file", source: "confs/cluster_key", destination: "/tmp/cluster_key"
-    s.vm.provision "file", source: "confs/cluster_key.pub", destination: "/tmp/cluster_key.pub"
-
-    s.vm.provision "shell", path: "scripts/common.sh"
-    s.vm.provision "shell", path: "scripts/server.sh"
-  end
-
-  config.vm.define "osivkovSW" do |w|
-    w.vm.hostname = "osivkovSW"
-    w.vm.network "private_network",
-      ip: "192.168.56.111",
-      libvirt__network_name: "iotnet"
-
-    w.vm.provision "file", source: "confs/cluster_key", destination: "/tmp/cluster_key"
-    w.vm.provision "file", source: "confs/cluster_key.pub", destination: "/tmp/cluster_key.pub"
-
-    w.vm.provision "shell", path: "scripts/common.sh"
-    w.vm.provision "shell", path: "scripts/worker.sh"
   end
 end
