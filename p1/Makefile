@@ -1,148 +1,139 @@
-
 .DEFAULT_GOAL := help
 
-SERVER := osivkovS
-WORKER := osivkovSW
+S  = osivkovS
+SW = osivkovSW
 
-define kubectl
-vagrant ssh $(SERVER) -c "sudo k3s kubectl $(1)"
-endef
+.PHONY: help up down status clean re kvm-off ssh-s ssh-sw \
+        eval check-vms check-host check-net check-ssh check-k3s nodes
 
-.PHONY: help keys prepare check up test status halt destroy \
-        cluster nodes node-info pods system-pods \
-        deployments services ingress events \
-        k3s-status logs-server logs-worker \
-        watch cluster-check
+# ---------- lifecycle ----------
+up:
+	vagrant up
 
-help:
-	@echo '=== P1: Infrastructure ==='
-	@echo 'make up             - Start and provision VMs'
-	@echo 'make test           - Run verification script'
-	@echo 'make status         - Show Vagrant VM status'
-	@echo 'make halt           - Stop VMs'
-	@echo 'make destroy        - Delete VMs and disks'
-	@echo ''
-	@echo '=== Kubernetes ==='
-	@echo 'make cluster        - Full cluster overview'
-	@echo 'make nodes          - Show nodes and IPs'
-	@echo 'make node-info      - Describe all nodes'
-	@echo 'make pods           - Show all pods'
-	@echo 'make system-pods    - Show kube-system pods'
-	@echo 'make deployments    - Show deployments'
-	@echo 'make services       - Show services'
-	@echo 'make ingress        - Show ingress resources'
-	@echo 'make events         - Show Kubernetes events'
-	@echo 'make watch          - Watch node status'
-	@echo ''
-	@echo '=== Diagnostics ==='
-	@echo 'make k3s-status     - Check K3s services'
-	@echo 'make logs-server    - Show server logs'
-	@echo 'make logs-worker    - Show worker logs'
-	@echo 'make cluster-check  - Run cluster health checks'
-
-# ==================================================
-# Infrastructure
-# ==================================================
-
-keys:
-	@if [ ! -f confs/cluster_key ]; then \
-		rm -f confs/cluster_key.pub; \
-		ssh-keygen -q -t ed25519 -N '' -f confs/cluster_key; \
-	fi
-	@ssh-keygen -y -f confs/cluster_key > confs/cluster_key.pub
-
-prepare:
-	bash ../scripts/prepare.sh p1
-
-check:
-	bash ../scripts/check.sh p1
-
-up: keys
-	$(MAKE) prepare
-	$(MAKE) check
-	vagrant up --provider=libvirt
-	$(MAKE) test
-
-test:
-	bash scripts/verify.sh
+down:
+	vagrant halt
 
 status:
 	vagrant status
 
-halt:
-	vagrant halt
-
-destroy:
+clean:
 	vagrant destroy -f
+	rm -f confs/node-token
 
-# ==================================================
-# Kubernetes
-# ==================================================
+re: clean up
 
-cluster:
-	$(call kubectl,cluster-info)
-	$(call kubectl,get nodes -o wide)
-	$(call kubectl,get pods -A)
+# free VT-x if KVM holds it (VERR_VMX_IN_VMX_ROOT_MODE)
+kvm-off:
+	-sudo systemctl stop libvirtd libvirtd.socket
+	-sudo modprobe -r kvm_intel kvm_amd
+	-sudo modprobe -r kvm
+
+ssh-s:
+	vagrant ssh $(S)
+
+ssh-sw:
+	vagrant ssh $(SW)
+
+# ---------- evaluation ----------
+eval: check-vms check-host check-net check-ssh check-k3s nodes
+	@echo
+	@echo "=== P1 EVAL: DONE ==="
+
+check-vms:
+	@echo "=== 1. Machines and resources (VirtualBox) ==="
+	@vagrant status
+	@for vm in $(S) $(SW); do \
+		echo "--- $$vm ---"; \
+		VBoxManage showvminfo $$vm --machinereadable | grep -E '^(name|memory|cpus)='; \
+	done
+
+check-host:
+	@echo "=== 2. Hostname, OS, CPU/RAM inside the VMs ==="
+	@for vm in $(S) $(SW); do \
+		echo "--- $$vm ---"; \
+		vagrant ssh $$vm -c 'hostname; grep PRETTY_NAME /etc/os-release; echo "CPU: $$(nproc)"; free -m | sed -n "1,2p"' 2>/dev/null; \
+	done
+
+check-net:
+	@echo "=== 3. Dedicated IPs on the host-only interface ==="
+	@vagrant ssh $(S)  -c 'ip -br -4 a | grep 192.168.56.110' 2>/dev/null
+	@vagrant ssh $(SW) -c 'ip -br -4 a | grep 192.168.56.111' 2>/dev/null
+	@echo "--- connectivity between machines ---"
+	@vagrant ssh $(S)  -c 'ping -c 2 -W 2 192.168.56.111' 2>/dev/null
+	@vagrant ssh $(SW) -c 'ping -c 2 -W 2 192.168.56.110' 2>/dev/null
+
+check-ssh:
+	@echo "=== 4. Passwordless SSH (BatchMode) ==="
+	@for vm in $(S) $(SW); do \
+		vagrant ssh-config $$vm > /tmp/ssh-$$vm.cfg; \
+		ssh -F /tmp/ssh-$$vm.cfg -o BatchMode=yes -o StrictHostKeyChecking=no $$vm 'echo "$$(hostname): ssh OK, no password needed"' 2>/dev/null; \
+		rm -f /tmp/ssh-$$vm.cfg; \
+	done
+
+check-k3s:
+	@echo "=== 5. K3s modes: server / agent ==="
+	@echo "--- $(S): server ---"
+	@vagrant ssh $(S)  -c 'systemctl is-active k3s; systemctl cat k3s | grep -A3 ExecStart | tr -d "\\\\"; k3s --version | head -1' 2>/dev/null
+	@echo "--- $(SW): agent ---"
+	@vagrant ssh $(SW) -c 'systemctl is-active k3s-agent; systemctl cat k3s-agent | grep -A3 ExecStart | tr -d "\\\\"' 2>/dev/null
 
 nodes:
-	$(call kubectl,get nodes -o wide)
+	@echo "=== 6. kubectl: nodes ==="
+	@vagrant ssh $(S) -c 'kubectl get nodes -o wide' 2>/dev/null
+	@echo "--- system pods ---"
+	@vagrant ssh $(S) -c 'kubectl get pods -A' 2>/dev/null
 
-node-info:
-	$(call kubectl,describe nodes)
 
-pods:
-	$(call kubectl,get pods -A -o wide)
 
-system-pods:
-	$(call kubectl,get pods -n kube-system -o wide)
-
-deployments:
-	$(call kubectl,get deployments -A)
-
-services:
-	$(call kubectl,get services -A)
-
-ingress:
-	$(call kubectl,get ingress -A)
-
-events:
-	$(call kubectl,get events -A --sort-by=.metadata.creationTimestamp)
-
-watch:
-	vagrant ssh $(SERVER) -c "sudo k3s kubectl get nodes -w"
-
-# ==================================================
-# K3s Diagnostics
-# ==================================================
-
-k3s-status:
-	@echo '=== K3s Server ==='
-	vagrant ssh $(SERVER) -c "systemctl is-active k3s"
-	@echo '=== K3s Worker ==='
-	vagrant ssh $(WORKER) -c "systemctl is-active k3s-agent"
-
-logs-server:
-	vagrant ssh $(SERVER) -c "sudo journalctl -u k3s -n 50 --no-pager"
-
-logs-worker:
-	vagrant ssh $(WORKER) -c "sudo journalctl -u k3s-agent -n 50 --no-pager"
-
-# ==================================================
-# Cluster Health
-# ==================================================
-
-cluster-check:
-	@echo '=== Vagrant ==='
-	vagrant status
-	@echo ''
-	@echo '=== K3s Services ==='
-	$(MAKE) k3s-status
-	@echo ''
-	@echo '=== Kubernetes Nodes ==='
-	$(call kubectl,get nodes -o wide)
-	@echo ''
-	@echo '=== Kubernetes System Pods ==='
-	$(call kubectl,get pods -n kube-system)
-	@echo ''
-	@echo '=== Kubernetes Events ==='
-	$(call kubectl,get events -A --sort-by=.metadata.creationTimestamp)
+# ---------- help ----------
+help:
+	@echo ""
+	@echo "=== P1 Commands ==="
+	@echo ""
+	@echo "--- Lifecycle ---"
+	@echo "make up          -> vagrant up"
+	@echo "make down        -> vagrant halt"
+	@echo "make status      -> vagrant status"
+	@echo "make clean       -> vagrant destroy -f"
+	@echo "                    rm -f confs/node-token"
+	@echo "make re          -> make clean && make up"
+	@echo ""
+	@echo "--- Virtualization ---"
+	@echo "make kvm-off     -> sudo systemctl stop libvirtd libvirtd.socket"
+	@echo "                    sudo modprobe -r kvm_intel kvm_amd"
+	@echo "                    sudo modprobe -r kvm"
+	@echo ""
+	@echo "--- SSH ---"
+	@echo "make ssh-s       -> vagrant ssh osivkovS"
+	@echo "make ssh-sw      -> vagrant ssh osivkovSW"
+	@echo ""
+	@echo "--- Evaluation ---"
+	@echo "make eval        -> make check-vms check-host check-net check-ssh check-k3s nodes"
+	@echo ""
+	@echo "make check-vms   -> vagrant status"
+	@echo "                    VBoxManage showvminfo VM --machinereadable"
+	@echo "                    grep name, memory, cpus"
+	@echo ""
+	@echo "make check-host  -> vagrant ssh VM -c 'hostname'"
+	@echo "                    cat /etc/os-release"
+	@echo "                    nproc"
+	@echo "                    free -m"
+	@echo ""
+	@echo "make check-net   -> ip -br -4 a"
+	@echo "                    ping -c 2 -W 2 192.168.56.110"
+	@echo "                    ping -c 2 -W 2 192.168.56.111"
+	@echo ""
+	@echo "make check-ssh   -> vagrant ssh-config VM"
+	@echo "                    ssh -F /tmp/ssh-VM.cfg -o BatchMode=yes VM"
+	@echo ""
+	@echo "make check-k3s   -> systemctl is-active k3s"
+	@echo "                    systemctl is-active k3s-agent"
+	@echo "                    systemctl cat k3s / k3s-agent"
+	@echo "                    k3s --version"
+	@echo ""
+	@echo "make nodes       -> vagrant ssh osivkovS -c 'kubectl get nodes -o wide'"
+	@echo "                    vagrant ssh osivkovS -c 'kubectl get pods -A'"
+	@echo ""
+	@echo "--- Help ---"
+	@echo "make help        -> Show this command list"
+	@echo ""
