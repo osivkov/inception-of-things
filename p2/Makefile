@@ -1,4 +1,3 @@
-
 .DEFAULT_GOAL := help
 
 IP := 192.168.56.110
@@ -7,20 +6,28 @@ define kubectl
 vagrant ssh -c "sudo k3s kubectl $(1)"
 endef
 
-.PHONY: help prepare check up test status halt destroy \
+.PHONY: help up test status halt destroy re clean kvm-off ssh \
 	cluster nodes pods system-pods deployments services \
 	ingress ingress-details replicas endpoints \
 	events k3s-status logs \
 	curl-app1 curl-app2 curl-default http-test \
 	all-checks
 
+# ==================================================
+# Help
+# ==================================================
+
 help:
 	@echo '=== P2: Infrastructure ==='
-	@echo 'make up               - Start VM and run tests'
+	@echo 'make up               - Start VM using VirtualBox and run tests'
 	@echo 'make test             - Run verify.sh'
 	@echo 'make status           - Vagrant status'
+	@echo 'make ssh              - SSH into the VM'
 	@echo 'make halt             - Stop VM'
 	@echo 'make destroy          - Delete VM and disk'
+	@echo 'make re               - Recreate VM from scratch'
+	@echo 'make clean            - Delete VM and .vagrant folder'
+	@echo 'make kvm-off          - Stop libvirt and unload KVM modules'
 	@echo ''
 	@echo '=== Kubernetes ==='
 	@echo 'make cluster          - Cluster overview'
@@ -31,7 +38,7 @@ help:
 	@echo 'make services         - All services'
 	@echo 'make ingress          - Ingress rules'
 	@echo 'make ingress-details  - Describe ingress'
-	@echo 'make replicas         - App replica counts'
+	@echo 'make replicas         - app2 replicas (must be 3)'
 	@echo 'make endpoints        - Service endpoints'
 	@echo 'make events           - Kubernetes events'
 	@echo ''
@@ -50,16 +57,8 @@ help:
 # Infrastructure
 # ==================================================
 
-prepare:
-	bash ../scripts/prepare.sh p2
-
-check:
-	bash ../scripts/check.sh p2
-
 up:
-	$(MAKE) prepare
-	$(MAKE) check
-	vagrant up --provider=libvirt
+	vagrant up --provider=virtualbox || vagrant up --provision
 	$(MAKE) test
 
 test:
@@ -68,11 +67,24 @@ test:
 status:
 	vagrant status
 
+ssh:
+	vagrant ssh
+
 halt:
 	vagrant halt
 
 destroy:
 	vagrant destroy -f
+
+re: destroy up
+
+clean: destroy
+	rm -rf .vagrant
+
+kvm-off:
+	-sudo systemctl stop libvirtd libvirtd.socket
+	-sudo modprobe -r kvm_intel kvm_amd
+	-sudo modprobe -r kvm
 
 # ==================================================
 # Kubernetes
@@ -105,7 +117,8 @@ ingress-details:
 	$(call kubectl,describe ingress -A)
 
 replicas:
-	$(call kubectl,get deployments -A)
+	$(call kubectl,get deployment app2 -o wide)
+	$(call kubectl,get pods -l app=app2 -o wide)
 
 endpoints:
 	$(call kubectl,get endpointslices -A)
