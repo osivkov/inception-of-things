@@ -1,5 +1,5 @@
 # -*- mode: ruby -*-
-BOX = "bento/debian-13"   # проверьте, что box существует, см. ниже
+BOX = "bento/debian-13"
 
 MACHINES = [
   { name: "osivkovS",  ip: "192.168.56.110", script: "scripts/server.sh", memory: 1024 },
@@ -8,6 +8,7 @@ MACHINES = [
 
 Vagrant.configure("2") do |config|
   config.vm.box = BOX
+  config.vm.boot_timeout = 600
   config.vm.synced_folder ".", "/vagrant", type: "virtualbox"
 
   MACHINES.each do |m|
@@ -19,6 +20,8 @@ Vagrant.configure("2") do |config|
         vb.name   = m[:name]
         vb.cpus   = 1
         vb.memory = m[:memory]
+        vb.customize ["modifyvm", :id, "--uartmode1", "disconnected"]
+        vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
       end
 
       node.vm.provision "shell", path: m[:script], env: { "NODE_IP" => m[:ip] }
