@@ -1,23 +1,22 @@
+# -*- mode: ruby -*-
 Vagrant.configure("2") do |config|
-	config.vm.box = "debian/trixie64"
-	config.vm.boot_timeout = 600
-	config.vm.synced_folder ".", "/vagrant", disabled: true
+  config.vm.box = "bento/debian-13"
+  config.vm.boot_timeout = 600
+  config.vm.synced_folder ".", "/vagrant", disabled: true
 
-	config.vm.define "osivkovS" do |server|
-		server.vm.hostname = "osivkovS"
-	
-		server.vm.provider :libvirt do |libvirt|
-			libvirt.cpus = 3
-			libvirt.memory = 3072
-		end
+  config.vm.define "osivkovS" do |server|
+    server.vm.hostname = "osivkovS"
+    server.vm.network "private_network", ip: "192.168.56.110"
 
-		server.vm.network "private_network",
-			ip: "192.168.56.110",
-			libvirt__network_name: "iotnet"
-      
-    server.vm.provision "file",
-      source: "confs/",
-      destination: "/home/vagrant/confs"			
-		server.vm.provision "shell", path: "scripts/server.sh"
-	end
+    server.vm.provider "virtualbox" do |vb|
+      vb.name   = "osivkovS"
+      vb.cpus   = 2
+      vb.memory = 2024
+      vb.customize ["modifyvm", :id, "--uartmode1", "disconnected"]
+      vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+    end
+
+    server.vm.provision "file", source: "confs/", destination: "/home/vagrant/confs"
+    server.vm.provision "shell", path: "scripts/server.sh"
+  end
 end

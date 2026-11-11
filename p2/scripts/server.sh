@@ -1,54 +1,37 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
-
 SERVER_IP="192.168.56.110"
-
-#Install the tools required to download k3s over HTTPS.
 
 apt-get update
 apt-get install -y curl ca-certificates
 
-#Install a single node k3s server on the private network
+# detect the interface that holds the private IP (eth1, enp0s8, ...)
+IFACE=$(ip -o -4 addr show | awk -v ip="$SERVER_IP" '$4 ~ "^"ip"/" {print $2}')
 
 if ! command -v k3s >/dev/null 2>&1; then
-
-  curl -fSL --connect-timeout 10 --max-time 120 https://get.k3s.io |
-	  INSTALL_K3S_VERSION="v1.36.5+k3s1" \
-	  INSTALL_K3S_EXEC="server --node-ip ${SERVER_IP} --advertise-address ${SERVER_IP} \
-	  --flannel-iface eth1" \
-	  sh -
+  curl -fsSL --retry 5 --retry-delay 3 https://get.k3s.io |
+    INSTALL_K3S_VERSION="v1.37.2+k3s1" \
+    INSTALL_K3S_EXEC="server --node-ip ${SERVER_IP} --advertise-address ${SERVER_IP} --flannel-iface ${IFACE} --write-kubeconfig-mode 644" \
+    sh -
 fi
 systemctl start k3s
-#Wait for the API and node to become ready.
 
-timeout 120s bash -c '
-	until k3s kubectl --request-timeout=10s get nodes >/dev/null 2>&1; do
-		sleep 3
-	done
-
-	k3s kubectl wait \
-		--for=condition=Ready \
-		nodes --all \
-		--timeout=90s
+# wait for the API and the node to become ready
+timeout 300s bash -c '
+  until k3s kubectl --request-timeout=10s get nodes >/dev/null 2>&1; do sleep 3; done
+  k3s kubectl wait --for=condition=Ready nodes --all --timeout=240s
 '
-
-#Display the resulting node configuration.
 
 k3s kubectl get nodes -o wide
 
-#Deploy applications and HTTP routes.
-
-for app in app1 app2 app3;do
+# deploy applications and HTTP routes
+for app in app1 app2 app3; do
   k3s kubectl apply -f "/home/vagrant/confs/${app}.yaml"
 done
-
 k3s kubectl apply -f /home/vagrant/confs/ingress.yaml
 
-# Wait for application deployments to become ready.
-
-for app in app1 app2 app3;do
-  k3s kubectl rollout status "deployment/${app}" --timeout=120s
+for app in app1 app2 app3; do
+  k3s kubectl rollout status "deployment/${app}" --timeout=180s
 done
