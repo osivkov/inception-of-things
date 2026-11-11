@@ -10,12 +10,12 @@ The project was developed by **osivkov** and **iriadyns**. See the [README](READ
 
 ```text
 p1/
-├── Vagrantfile              # K3s server and worker
-├── Makefile                 # Startup, verification and cluster inspection
-├── confs/                   # iotnet definition and local cluster_key* files
-└── scripts/                 # Common guest setup, server, worker and verify
+├── Vagrantfile              # K3s server and worker (VirtualBox)
+├── Makefile                 # Startup, evaluation checks and cluster inspection
+├── confs/                   # .gitkeep; node-token is written here at runtime (git-ignored)
+└── scripts/                 # server.sh and agent.sh
 p2/
-├── Vagrantfile              # One VM running K3s
+├── Vagrantfile              # One VM running K3s (VirtualBox)
 ├── Makefile
 ├── confs/                   # Three applications and their Ingress
 └── scripts/                 # K3s installation, manifest application and verify
@@ -32,10 +32,9 @@ bonus/
 ├── charts/gitlab/           # Local chart for GitLab CE
 ├── confs/                   # Namespace, Application and seed manifests
 └── scripts/                 # Helm installation, startup and GitLab API bootstrap
-scripts/
-├── prepare.sh               # Shared libvirt preparation for P1/P2
-└── check.sh                 # Prepared environment checks
 ```
+
+Git ignores `.vagrant/` and `p1/confs/node-token`. The `confs/` folder of P1 is kept in Git through a `.gitkeep` file: the server script writes the join token there, and the folder must exist inside the shared directory.
 
 ### Makefiles
 
@@ -43,11 +42,51 @@ Each part has a `Makefile` to group the commands needed for that environment. Th
 
 | Part | Main tasks |
 | --- | --- |
-| P1 | Generate guest SSH keys, prepare libvirt, start VMs, verify K3s nodes and inspect logs |
-| P2 | Prepare the VM, deploy three applications, test replicas and Ingress routes |
+| P1 | Start both VMs, run the evaluation checks (`eval`, `check-*`), inspect nodes, SSH into either VM, recreate or delete the VMs, free VT-x from KVM (`kvm-off`) |
+| P2 | Start the VM and run `verify.sh`, deploy three applications, test replicas and Ingress routes, inspect Kubernetes objects, free VT-x from KVM (`kvm-off`) |
 | P3 | Install tools, manage the k3d cluster, access Argo CD and switch GitOps sources |
 
-For example, `make -C p1 up` prepares the P1 environment and then runs its verification checks. See each Makefile for the full list of targets.
+For example, `make -C p1 eval` prints every P1 evaluation check, and `make -C p2 all-checks` prints the P2 overview. See each Makefile for the full list of targets (`make help` in P2 and P3; a bare `make` in P1).
+
+P1 evaluation targets:
+
+| Target | What it shows |
+| --- | --- |
+| `check-vms` | `vagrant status` and, from `VBoxManage showvminfo`, each VM's name, memory and CPU count |
+| `check-host` | Hostname, OS, `nproc` and `free -m` inside each guest |
+| `check-net` | The `192.168.56.110/111` addresses and ping between the guests |
+| `check-ssh` | Passwordless SSH with `BatchMode=yes` |
+| `check-k3s` | `k3s` active on the server, `k3s-agent` active on the worker, and their `ExecStart` lines |
+| `nodes` | `kubectl get nodes -o wide` and `kubectl get pods -A` from the server |
+| `eval` | All of the above in order |
+
+## Installing VirtualBox and Vagrant
+
+Debian 13 (trixie) no longer ships VirtualBox in its own repositories, so install it from Oracle's APT repository. This is a one-time setup inside the outer Debian VM:
+
+```bash
+sudo apt update
+sudo apt install -y curl gpg build-essential dkms linux-headers-$(uname -r)
+
+curl -fsSL https://www.virtualbox.org/download/oracle_vbox_2016.asc \
+  | sudo gpg --dearmor -o /usr/share/keyrings/oracle-virtualbox-2016.gpg
+
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/oracle-virtualbox-2016.gpg] https://download.virtualbox.org/virtualbox/debian trixie contrib" \
+  | sudo tee /etc/apt/sources.list.d/virtualbox.list
+
+sudo apt update
+sudo apt install -y virtualbox-7.2
+sudo usermod -aG vboxusers "$USER"     # log out and in afterwards
+```
+
+Install Vagrant from HashiCorp's repository (see the [Vagrant installation guide](https://developer.hashicorp.com/vagrant/install)) rather than from Debian: Debian trixie packages Vagrant 2.3.7, which is older than the 2.4.x series used here and predates VirtualBox 7.2. Check which one is installed and where it comes from:
+
+```bash
+vagrant --version
+apt policy vagrant
+VBoxManage --version
+lsmod | grep vboxdrv
+```
 
 ## Resource allocation and versions
 
@@ -55,21 +94,23 @@ The Vagrantfiles set VM resources. Kubernetes requests and limits control contai
 
 | Configuration file | Current allocation |
 | --- | --- |
-| `p1/Vagrantfile` | Default: 1 vCPU / 1024 MiB; server override: 2 vCPU / 2048 MiB |
-| `p2/Vagrantfile` | 3 vCPU / 3072 MiB for the server |
+| `p1/Vagrantfile` | Both machines: 1 vCPU / 1024 MiB (set per machine in the `MACHINES` list) |
+| `p2/Vagrantfile` | 1 vCPU / 1024 MiB for the server |
 | `p3/confs/cluster.yaml` | 1 server, 0 agents; no explicit CPU or RAM limits |
 | `bonus/charts/gitlab/templates/deployment.yaml` | requests: 1 CPU / 2 GiB; limits: 4 CPU / 4 GiB; `/dev/shm`: memory-backed emptyDir up to 256 MiB |
 | `bonus/charts/gitlab/templates/storage.yaml` | PVCs: config 1 GiB, data 10 GiB, logs 2 GiB; StorageClass `local-path` |
 
 The GitLab PVC capacities do not include image storage or other cluster data.
 
-The versions below are configured in the project files. Check compatibility before changing them.
+The versions below are configured in the project files or were used in our runs. Check compatibility before changing them.
 
 | Component | Value in the project | Source |
 | --- | --- | --- |
-| P1/P2 Debian box | `debian/trixie64`, no `box_version` set | Both Vagrantfiles |
-| P1 K3s | Not pinned | `p1/scripts/server.sh`, `worker.sh` |
-| P2 K3s | `v1.36.5+k3s1` | `p2/scripts/server.sh` |
+| VirtualBox (outer Debian VM) | 7.2.22 from Oracle's repository | Installed on the host, not in the repository |
+| Vagrant (outer Debian VM) | 2.4.9 | Installed on the host, not in the repository |
+| P1/P2 Debian box | `bento/debian-13` (v202510.26.0 in our runs), provider `virtualbox`, no `box_version` set | Both Vagrantfiles |
+| P1 K3s | Not pinned: the installer's stable channel (v1.37.2+k3s1 in our runs) | `p1/scripts/server.sh`, `agent.sh` |
+| P2 K3s | `v1.37.2+k3s1` | `p2/scripts/server.sh` |
 | P3/bonus K3s | `rancher/k3s:v1.36.5-k3s1` | `p3/confs/cluster.yaml` |
 | k3d | `v5.9.0` | `p3/scripts/install.sh` |
 | P3 kubectl | `v1.36.5` | `p3/scripts/install.sh` |
@@ -80,34 +121,45 @@ The versions below are configured in the project files. Check compatibility befo
 | P2 app2/app3 | `hashicorp/http-echo:1.0.0` | `p2/confs/app2.yaml`, `app3.yaml` |
 | One More Cup | `osivkov/one-more-cup:v1`, with `v2` for the update demonstration | P3 Deployment and bonus seed Deployment |
 
-P3 uses Docker from Debian packages; K3s in P1/P2 uses its own container runtime.
+P3 uses Docker from Debian packages; K3s in P1/P2 uses its own container runtime. P2 and P3 run slightly different K3s minor versions (v1.37 and v1.36); they are independent environments, so this does not affect behavior, but keep it in mind when upgrading.
 
-P1 uses the version supplied by the K3s installer, while P2/P3 configure explicit versions. Updating `cluster.yaml` alone does not upgrade an existing k3d cluster.
+P2 pins its K3s version, while P1 uses the version supplied by the K3s installer. Updating `cluster.yaml` alone does not upgrade an existing k3d cluster.
 
 ## Networks and addresses
 
 ### P1/P2
 
-Vagrant uses system libvirt at `qemu:///system`. Each VM has a Vagrant management network and a separate project network:
+Each VirtualBox guest has two adapters, created by Vagrant:
+
+| Adapter | Type | Purpose |
+| --- | --- | --- |
+| Adapter 1 | NAT (`10.0.2.15` inside the guest) | Internet access and Vagrant's SSH, through a forwarded port on `127.0.0.1` of Debian (`2222` for the first VM; Vagrant picks another port, such as `2200`, if it is taken) |
+| Adapter 2 | Host-only (`private_network`) | The project network, `192.168.56.0/24` |
 
 | Purpose | Configuration |
 | --- | --- |
-| Vagrant management | In this lab: `vagrant-libvirt`, subnet `192.168.121.0/24`; used by Vagrant for management and SSH |
-| Project network | `iotnet`, NAT, bridge `virbr56`, gateway `192.168.56.1/24` |
+| Project network | VirtualBox host-only network, created by Vagrant; Debian sees it as an interface such as `vboxnet0` with `192.168.56.1/24` |
 | P1 or P2 server | `192.168.56.110` |
 | P1 worker | `192.168.56.111` |
 | K3s API used by the worker | `https://192.168.56.110:6443` |
 | P2 Ingress | `http://192.168.56.110:80` |
 
-The `iotnet` definition is in `p1/confs/iotnet.xml` and `p2/confs/iotnet.xml`. Preparation defines the network if missing, enables autostart and starts it if inactive. Editing the XML does not automatically redefine an existing network. Inspect its actual configuration with:
+VirtualBox 7 only allows host-only addresses inside the ranges listed in `/etc/vbox/networks.conf`; `192.168.56.0/21` is allowed by default, so no change is required. Inspect the actual configuration with:
 
 ```bash
-virsh -c qemu:///system net-list --all
-virsh -c qemu:///system net-dumpxml iotnet
+VBoxManage list hostonlyifs
+VBoxManage list runningvms
 ip -br address
+vagrant ssh-config
 ```
 
-P2 passes `--flannel-iface eth1` to K3s. When moving to another box, run `ip -br address` inside the VM and check the interface name. The selected interface must have `192.168.56.110`.
+Inside the guests the project interface name varies by box (`eth1` in the Vagrant boxes we used, but modern distributions may call it `enp0s8`). Both K3s installation scripts therefore detect it by its address instead of hardcoding it:
+
+```bash
+IFACE=$(ip -o -4 addr show | awk -v ip="$NODE_IP" '$4 ~ "^"ip"/" {print $2}')
+```
+
+The result is passed to K3s as `--flannel-iface`. If K3s ever uses `10.0.2.15` as the node address, the worker cannot join; check `kubectl get nodes -o wide` for `INTERNAL-IP`.
 
 ### P3/bonus
 
@@ -133,23 +185,36 @@ The second request requires GitLab to be running. Application access on 8888 doe
 
 ### P1
 
-`make up` calls `keys`, then `prepare`, `check`, `vagrant up --provider=libvirt` and `test`. The Makefile uses Vagrant's default startup behavior.
+`make up` runs `vagrant up` for the server first and then the worker, so the server can publish the join token before the worker needs it. The Vagrantfile defines both machines from one `MACHINES` list (name, IP, provisioning script, memory) and applies common settings: the `bento/debian-13` box, a 600-second boot timeout, a VirtualBox shared folder (`.` → `/vagrant`), a host-only `private_network`, 1 vCPU and the memory from the list.
 
-On both VMs, `common.sh` installs tools and SSH keys, adds hostnames to `/etc/hosts` and disables swap. `server.sh` installs K3s in server mode. `worker.sh` fetches `/var/lib/rancher/k3s/server/node-token` from the server over SSH and installs the agent with the API address and token. If the token cannot be read, worker provisioning fails.
+Two VirtualBox options are set on every guest. `--uartmode1 disconnected` avoids the serial-port logging that can stall boot of some Debian boxes at "SSH auth method: private key", and `--natdnshostresolver1 on` makes DNS inside the guest follow the host resolver.
+
+`server.sh` finds the project interface by IP, installs K3s in server mode with `--node-ip`, `--advertise-address`, `--flannel-iface` and `--write-kubeconfig-mode=644`, waits until the node is `Ready`, creates `/vagrant/confs` if needed, removes any old token and copies `/var/lib/rancher/k3s/server/node-token` to `/vagrant/confs/node-token`.
+
+`agent.sh` waits for that file, reads the token and installs K3s in agent mode with `K3S_URL=https://192.168.56.110:6443`, `K3S_TOKEN`, `--node-ip` and `--flannel-iface`. If no token appears within the bounded wait, provisioning fails instead of hanging. K3s installs `kubectl` on the server; the worker has no administrative kubeconfig.
 
 K3s inside the guests uses its own container runtime. P1/P2 do not require Docker on each node; Docker in the outer Debian VM is used by K3d for P3.
 
-The SSH key pair is used only for communication between the P1 guests. The Makefile creates it when required.
-
-This is a local lab, not a production setup. SSH host-key checking is disabled for `192.168.56.*`, and the server kubeconfig is readable by all local users (`644`). Do not copy these settings to a shared machine. The worker does not get an admin kubeconfig.
+This is a local lab, not a production setup. The join token lives in a plain file on the host and the server kubeconfig is readable by all local users (`644`). Do not copy these settings to a shared machine. The worker does not get an admin kubeconfig.
 
 ### P2
 
-Vagrant copies `confs/` into `/home/vagrant/confs` on the guest. `server.sh` installs K3s if missing, starts the service, waits for the API and a Ready node, applies the applications and Ingress, then waits for all three Deployment rollouts.
+The shared folder is disabled. Vagrant copies `confs/` into `/home/vagrant/confs` on the guest with a `file` provisioner. `server.sh` installs K3s (`v1.37.2+k3s1`) if missing, starts the service, waits for the API and a Ready node, applies the applications and Ingress, then waits for all three Deployment rollouts.
+
+Traefik is installed by K3s through its Helm controller after the API starts, so it comes up a little later than the application Pods. Until then port 80 refuses connections. `scripts/verify.sh` therefore retries each HTTP request for several minutes; if you script your own checks, do the same.
 
 App1 gets its HTML from ConfigMap `app1-page` and serves it with nginx on port 80. App2 and app3 listen on 5678; their Services accept port 80 and forward to 5678. The Ingress rule without a `host` routes to app3. All these resources are in namespace `default`.
 
 After editing the copied files, run `vagrant provision osivkovS` from `p2`. Editing local YAML alone does not change resources inside an existing VM.
+
+### P1 and P2 together
+
+Both parts name their VM `osivkovS` in VirtualBox and use `192.168.56.110`. VirtualBox refuses to import a second VM with an existing name, even if the first one is powered off, so destroy one part before starting the other:
+
+```bash
+make -C p1 clean     # before starting p2
+make -C p2 destroy   # before starting p1
+```
 
 ### P3 and bonus
 
@@ -172,33 +237,55 @@ Argo CD reads the repository configured in `spec.source.repoURL`. Changes need t
 
 The bonus bootstrap creates a public group and project, then adds `deployment.yaml` and `service.yaml` in the first commit only when the repository is empty. It does not update an existing branch from the local seed files. `GITLAB_GROUP` and `GITLAB_PROJECT` change the bootstrap project's address, but the URL in `bonus/confs/argocd-application.yaml` remains explicitly configured.
 
-GitLab serves Git over HTTP in this setup. No separate GitLab SSH Service is exposed, and the P1 lab key pair is not needed for GitLab.
+GitLab serves Git over HTTP in this setup. No separate GitLab SSH Service is exposed.
 
 ## What the checks cover
 
 | Command | Checks | Inspect separately |
 | --- | --- | --- |
-| `make -C p1 check` | Vagrantfile, libvirt access, Intel EPT, active/autostart iotnet and conflict with P2 | Kubernetes state after startup |
-| `make -C p1 test` | SSH to both guests, hostname/IP, K3s services, server kubectl and two Ready nodes | All system Pods and events |
-| `make -C p2 test` | Guest, K3s, one Ready node, application rollouts, 3 ready app2 replicas and HTTP for three Hosts | Ingress and Service details: the script lists them but does not compare the full YAML |
+| `make -C p1 eval` | VM names, CPUs and memory, guest OS, the two IPs and ping, passwordless SSH, `k3s` / `k3s-agent` services, `kubectl get nodes -o wide`, all Pods | Events and logs when a Pod is unhealthy |
+| `make -C p2 test` | Guest, K3s service, one Ready node, application rollouts, 3 ready app2 replicas and HTTP for three Hosts | Ingress and Service details: the script lists them but does not compare the full YAML |
 | `make -C p3 verify` | Application Synced/Healthy, rollout, `/healthz` and v1/v2 inside the container | Browser access, Service/Ingress and the intended Git revision |
 
 P3 `verify` accepts both v1 and v2. To prove an update specifically to v2, check the current image, Git revision and `/version.json`. A successful request inside a Pod does not prove the user's tunnel is open.
 
 ## Nested virtualization
 
-P1 and P2 run KVM guests inside a Debian VM hosted by VirtualBox. This requires nested virtualization and access to libvirt from Debian.
+P1 and P2 run VirtualBox guests inside a Debian VM that is itself a VirtualBox guest on the Codam machine. This needs hardware virtualization exposed to the outer VM and working VirtualBox kernel modules inside it.
 
-The shared `scripts/prepare.sh` configures Intel KVM with `ept=0` and saves the setting in `/etc/modprobe.d/iot-kvm.conf`. Changing this module option requires running libvirt guests to be stopped before the module is reloaded. This is specific to the lab environment and is not a general KVM requirement.
+The main trap is KVM. If the `kvm` kernel modules are loaded in the outer Debian VM (they are pulled in when libvirt/QEMU is used or installed), they own VT-x and VirtualBox cannot start a guest:
 
-If VM startup fails, first check the libvirt domains and KVM support:
-
-```bash
-virsh -c qemu:///system list --all
-lsmod | grep kvm
+```text
+VBoxManage: error: VT-x is being used by another hypervisor (VERR_VMX_IN_VMX_ROOT_MODE)
 ```
 
-For host-level VirtualBox failures, inspect the VirtualBox logs as well as the Debian guest logs.
+Free VT-x with the Makefile helper (available in `p1` and `p2`) and verify:
+
+```bash
+make kvm-off
+lsmod | grep kvm        # must print nothing
+lsmod | grep vboxdrv    # must print the module
+```
+
+`kvm-off` stops `libvirtd`, then unloads `kvm_intel` / `kvm_amd` and `kvm`. To keep KVM from returning after a reboot, blacklist it:
+
+```bash
+printf 'blacklist kvm\nblacklist kvm_intel\nblacklist kvm_amd\n' | sudo tee /etc/modprobe.d/blacklist-kvm.conf
+sudo systemctl disable --now libvirtd libvirtd.socket 2>/dev/null
+sudo update-initramfs -u
+```
+
+Other checks for the outer VM:
+
+```bash
+grep -Ec '(vmx|svm)' /proc/cpuinfo      # hardware virtualization visible, must be > 0
+sudo /sbin/vboxconfig                    # rebuild the kernel modules if vboxdrv is missing
+mokutil --sb-state                       # Secure Boot blocks unsigned vboxdrv modules
+```
+
+If `vboxdrv` is missing after a kernel update, install matching `linux-headers-$(uname -r)` and run `sudo /sbin/vboxconfig`.
+
+Nested guests start slowly. The Vagrantfiles set a 600-second boot timeout for that reason. Avoid powering off the outer VM while the inner VMs are running: shut them down first (`make down` / `make halt`). An abrupt power-off can leave the K3s server in an unready state on the next start.
 
 ## Troubleshooting
 
@@ -206,22 +293,30 @@ Check the failing component first. These commands work on an existing environmen
 
 | Symptom | What to check |
 | --- | --- |
-| `make check` fails before VM startup | `virsh -c qemu:///system list --all`, `net-list --all`, EPT access and `vagrant validate` in the relevant part |
-| Worker missing from `get nodes` | `k3s-agent`, worker-to-server SSH access, server and agent logs |
-| Pod is `Pending` or in `CrashLoopBackOff` | `describe pod` and events in the relevant namespace, then container logs |
+| `VERR_VMX_IN_VMX_ROOT_MODE` on `vagrant up` | KVM holds VT-x. Run `make kvm-off`, confirm `lsmod \| grep kvm` is empty, then retry |
+| `Kernel driver not installed` / no `vboxdrv` | `sudo /sbin/vboxconfig`, matching `linux-headers`, Secure Boot state |
+| `unsupported VirtualBox version` from Vagrant | Vagrant is too old for the installed VirtualBox; use the HashiCorp build (2.4.x) |
+| `vagrant up` stops at "SSH auth method: private key" | The guest is still booting: wait, rerun `make up` (the boot timeout is 600 s). Take a screenshot to see the console: `VBoxManage controlvm <name> screenshotpng /tmp/vm.png` |
+| `cp: cannot create regular file '/vagrant/confs/node-token'` | `p1/confs/` is missing; recreate it with `mkdir -p p1/confs && touch p1/confs/.gitkeep` and run `vagrant provision osivkovS` |
+| Worker missing from `get nodes`, `k3s-agent` repeats `503` / "server is not ready" | The server's API is not ready. Check `systemctl is-active k3s` and `kubectl get nodes` on `osivkovS`, then `journalctl -u k3s -b` there |
+| Worker joins but node IPs are `10.0.2.15` | `--flannel-iface` / `--node-ip` did not match the host-only interface; check `ip -br -4 a` in the guest |
+| `kubectl` on the worker prints `localhost:8080 refused` | Expected: the worker has no kubeconfig. Run `kubectl` on the server |
+| `A VirtualBox machine with the name osivkovS already exists` | P1 or P2 is still defined; `make clean` / `make destroy` in the other part, then `VBoxManage list vms` |
 | P2 shows app3 when accessed by IP | This is the default route; app1/app2 require their Host header |
-| P2 does not respond at all | `eth1`, Traefik, Service endpoints, routes and HTTP from Debian before testing the tunnel |
+| P2 `curl` is refused right after boot | Traefik is still starting; `make -C p2 system-pods`, then repeat `make -C p2 test` |
+| P2 does not respond at all | The project interface, Traefik, Service endpoints and routes; test HTTP from Debian before testing the tunnel |
+| Pod is `Pending` or in `CrashLoopBackOff` | `describe pod` and events in the relevant namespace, then container logs |
 | Docker returns `permission denied` | Current user access; start a new login session after installation or group changes |
 | Argo CD does not update the image | Active repoURL, branch, Git revision and whether the change was pushed there |
 | Browser reports connection refused | Debian port-forward, Codam SSH tunnel and an available local port |
 | GitLab is not ready | Pods, PVCs, events in `gitlab`, available RAM and disk space |
 
-P1 already provides diagnostic targets:
+Useful diagnostics for P1:
 
 ```bash
-make -C p1 cluster-check
-make -C p1 logs-server
-make -C p1 logs-worker
+make -C p1 eval
+vagrant ssh osivkovS -c 'sudo journalctl -u k3s -b --no-pager | tail -50'
+vagrant ssh osivkovSW -c 'sudo journalctl -u k3s-agent -b --no-pager | tail -50'
 ```
 
 For P2, use `make -C p2 all-checks` and `make -C p2 logs`. For P3:
@@ -234,15 +329,18 @@ kubectl --context=k3d-iot -n dev get events --sort-by=.metadata.creationTimestam
 
 ## Cleanup between evaluations
 
-Stopping keeps the environment; deleting removes it. `halt` and `k3d cluster stop iot` preserve the environment. To rebuild P1/P2, run `make -C p1 destroy` and `make -C p2 destroy` from the clone that owns the VMs. For P3, remove the existing `iot` with `k3d cluster delete iot`.
+Stopping keeps the environment; deleting removes it. `make down` (P1), `make halt` (P2) and `k3d cluster stop iot` preserve the environment. To rebuild P1/P2, run `make -C p1 clean` and `make -C p2 destroy` from the clone that owns the VMs. For P3, remove the existing `iot` with `k3d cluster delete iot`.
 
 Check for remaining resources before starting again:
 
 ```bash
-virsh -c qemu:///system list --all
+VBoxManage list vms
+vagrant global-status --prune
 k3d cluster list
 docker ps -a
 ```
+
+If a VM was removed by hand and Vagrant still lists it, `vagrant global-status --prune` clears the stale entry. A leftover VirtualBox VM can be removed with `VBoxManage unregistervm <name> --delete`.
 
 Deleting the k3d cluster also deletes GitLab data stored inside it. Use the backup procedure below if that data needs to be kept.
 
