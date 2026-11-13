@@ -14,6 +14,6 @@ spec:
     spec:
       containers:
        - name: playground
-         image: osivkov/one-more-cup:v1
+         image: osivkov/one-more-cup:v2
          ports:
            - containerPort: 8888
